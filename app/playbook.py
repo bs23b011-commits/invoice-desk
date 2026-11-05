@@ -40,6 +40,13 @@ PLAYBOOK = {
     "GRN_SHORT": dict(category="Goods not received yet", owner="Stores / receiving", sla_h=48, escalate=PROC,
                       q=lambda f, c: f"Have all {_f(f, 'billed')} × {_f(f, 'item')} arrived? The warehouse shows "
                                      f"{_f(f, 'received')}."),
+    # ---- the document itself --------------------------------------------------------------------------
+    "PAGES_UNREAD": dict(category="Pages not read", owner=AP, sla_h=24, escalate=CTRL,
+                         q=lambda f, c: f"Only {_f(f, 'read')} of {_f(f, 'pages')} pages could be read. Do the lines "
+                                        "and the total on the invoice match what is shown here?"),
+    "FOREIGN_CURRENCY": dict(category="Foreign-currency invoice", owner=CTRL, sla_h=48, escalate=CTRL,
+                             q=lambda f, c: f"This invoice is in {_f(f, 'currency')}. Pay it as a foreign remittance "
+                                            "outside this desk, or reject it?"),
     # ---- vendor ------------------------------------------------------------------------------------
     "VENDOR_UNKNOWN": dict(category="Vendor not onboarded", owner=VMT, sla_h=72, escalate=CTRL,
                            q=lambda f, c: f"Is '{c.get('vendor_name')}' a vendor we use? Start onboarding (KYC, bank "

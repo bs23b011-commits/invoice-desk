@@ -143,3 +143,17 @@ def load_gstr2b(path) -> list[dict]:
         return json.loads(path.read_text())
     except FileNotFoundError:
         return []
+
+
+FOREIGN = re.compile(r"(?:\b(USD|EUR|GBP|AED|SGD|JPY|CNY|AUD|CAD)\b|(US\$|S\$|€|£|\$))\s?\d|"
+                     r"\d[\d,.]*\s?(?:\b(USD|EUR|GBP|AED|SGD|JPY|CNY|AUD|CAD)\b|(€|£))", re.I)
+SYMBOL = {"$": "USD", "US$": "USD", "S$": "SGD", "€": "EUR", "£": "GBP"}
+
+
+def foreign_currency(text: str) -> str | None:
+    """The currency of the amounts, if it is clearly not INR (at least two amounts carry it)."""
+    hits = [next(g for g in m.groups() if g) for m in FOREIGN.finditer(text or "")]
+    hits = [SYMBOL.get(h, SYMBOL.get(h.upper(), h.upper())) for h in hits]
+    if len(hits) < 2:
+        return None
+    return max(set(hits), key=hits.count)

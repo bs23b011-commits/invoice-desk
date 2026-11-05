@@ -26,7 +26,7 @@ An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves
 | Single-digit errors above ₹1 caught by the arithmetic check | **100%** of 125 injected |
 | Good invoices still sent to a person | 5 of 10, all fax-quality scans where OCR was unsure of the invoice number. Conservative by design. |
 
-**191 automated tests** (`STAGE_DELAY=0 python -m pytest -q`), 68 of them for Jeen. All five n8n workflows tested live in n8n 1.123.
+**206 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 15 for strange files and your own data (`tests/test_judge_kit.py`). All five n8n workflows tested live in n8n 1.123.
 
 ## The 11 stages (live on screen for every invoice)
 
@@ -140,13 +140,30 @@ here — **not yet run against a live key**.
 
 All of this is fictional data: 8 vendors, 13 POs, goods receipts, invoice history and GSTR-2B. **Reset demo data** restores the starting state.
 
+## Testing it with your own invoices
+
+The demo's vendors and POs are fictional, so an invoice from your own supplier stops at "vendor not onboarded" (correctly: nobody unknown gets paid). Two ways to check it fully:
+
+1. **Records → Use your own vendors, POs and goods receipts.** Download the templates, fill them (or export from your ERP), upload vendors, then POs, then receipts. CSV or Excel; column names like "GST No", "Qty", "Rate" are understood. Bad rows are listed and skipped. Your data survives "Reset demo data"; "Remove my imported data" takes it out.
+2. **Onboard from the hold.** On a "vendor not onboarded" invoice in *Waiting for you*, fill in the vendor form (bank account confirmed with the vendor, not copied from the invoice) and the agent re-checks.
+
+**Strange files are handled, not crashed on:**
+
+| File | What happens |
+|---|---|
+| Phone photo or image scan (JPG, PNG, TIFF, WEBP) | Turned into a page and read with OCR |
+| Password-protected or damaged PDF | Plain reason ("ask the vendor for a copy without a password"). From email it still appears in *Waiting for you*, so it can't get lost |
+| Logo or signature image in an email | Ignored |
+| Foreign-currency invoice | Held for the finance controller |
+| Totals on page 2 | Read (digital PDFs, up to 5 pages) |
+
 ## Run it
 
 ```bash
 # Python 3.11+, Tesseract (Windows: winget install UB-Mannheim.TesseractOCR | macOS: brew install tesseract tesseract-lang)
 pip install -r requirements.txt
 uvicorn app.main:app --reload             # http://localhost:8000
-STAGE_DELAY=0 python -m pytest -q         # 123 tests
+STAGE_DELAY=0 python -m pytest -q         # 206 tests
 python scripts/evaluate.py                # accuracy report -> docs/EVALUATION.md + dashboard
 python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVAL.md
 ```
@@ -196,13 +213,14 @@ python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVA
 - **Tax rates:** TDS rates and thresholds follow the Income-tax Act 2025 (s.393) as published for tax year 2026-27. **Verify against current law before relying on them.**
 - **IRN check is offline:** the IRN is recomputed offline. Live verification on the IRP needs a GSP connection.
 - **Simulated pieces:** GSTR-2B, the ERP ("Mock ERP") and the bank are local stand-ins with the same interfaces a real Zoho Books / Tally / ERPNext adapter or bank API would use.
-- **One page only:** only page 1 of an invoice is read. Fax-quality Hindi scans usually go to a person; digital Hindi invoices are automatic.
+- **Pages:** digital PDFs are read up to 5 pages. On a scan only page 1 is OCR'd, and a multi-page scan goes to a person. Fax-quality Hindi scans usually go to a person; digital Hindi invoices are automatic.
+- **Currency:** INR only. An invoice in USD, EUR, GBP and so on is held for the finance controller.
 
 ## What I'd build next
 
 - Live GSP connection for IRN and GSTR-2B
 - A real ERP adapter (Zoho Books / ERPNext) behind the same find / post / read interface
-- Multi-page invoices
+- OCR of every page of a multi-page scan
 - Vendor credit-note matching
 - Running the vision reader with a key on the evaluation set, to measure how many of the held scans it would release
 

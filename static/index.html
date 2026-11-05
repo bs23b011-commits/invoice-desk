@@ -60,8 +60,8 @@
     <aside class="inbox" aria-label="Inbox">
       <h2>Inbox</h2>
       <label class="drop" id="drop">
-        <input type="file" id="file" accept="application/pdf" hidden>
-        <span class="drop-title">Drop an invoice PDF</span>
+        <input type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp" hidden>
+        <span class="drop-title">Drop an invoice PDF or photo</span>
         <span class="drop-sub">or choose a file</span>
       </label>
       <div id="samples"></div>
@@ -159,6 +159,11 @@
     <section class="panel"><h2>What it has learned</h2>
       <p class="muted panel-note">Labels and GL codes taught by reviewers. Each one shows who taught it and when.</p>
       <div id="learned"></div></section>
+    <section class="panel" id="byod"><h2>Use your own vendors, POs and goods receipts</h2>
+      <p class="muted panel-note">Testing with your own invoices? Their vendor and purchase order must be on file, or the agent
+        (correctly) holds them as "vendor not onboarded". Upload a CSV or Excel file for each; download a template to see
+        the columns. Bad rows are listed and skipped. Your data stays when you press Reset demo data.</p>
+      <div id="master"></div></section>
     <section class="panel"><h2>Vendor master</h2><div id="vendors"></div></section>
     <section class="panel"><h2>Purchase orders</h2><div id="pos"></div></section>
     <section class="panel"><h2>Invoice ledger</h2>
@@ -172,5 +177,6 @@
 <script src="/static/app.js"></script>
 <script src="/static/waiting.js"></script>
 <script src="/static/jeen.js"></script>
+<script src="/static/master.js"></script>
 </body>
 </html>

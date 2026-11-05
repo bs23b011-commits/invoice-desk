@@ -1,0 +1,21 @@
+file,mess_type,what_is_wrong,expected_decision,reason
+m01_skew_noise.pdf,crooked scan,"page rotated 4 degrees, grey background noise, no text layer",REVIEW,OCR on a skewed noisy scan is unsure of at least one key field; the app holds rather than guess
+m02_fax_100dpi.pdf,fax quality,"100 dpi, 1-bit black and white, salt-and-pepper speckles",REVIEW,worst-case OCR; fields that cannot be read confidently go to a person
+m03_coffee_stain.pdf,stain over tax table,dark blob covers the CGST/SGST rows; grand total readable,REVIEW,"tax lines are obscured, so the invoice cannot be proved to agree with itself"
+m04_stamp_signature.pdf,stamp and signature,'RECEIVED' stamp and a pen scribble cross the total line,REVIEW,"ink crosses the grand total, so the total is not reliably readable"
+m05_grid_layout.pdf,unfamiliar layout,"items drawn as side-by-side cards, labels to the right of values",APPROVE,digital text layer and a real PO match; only the arrangement is new
+m06_odd_labels.pdf,unusual labels,"'Bill No.', 'Document Date', 'Tax Inv. Ref' instead of the usual words",APPROVE,the values are all present and the maths holds; only the label wording differs
+m07_mixed_dates.pdf,mixed date formats,"'04-Nov-26', '4/12/2026' and 'November 4th 2026' on one page",APPROVE,all three are unambiguous; the parser should normalise them
+m08_currency_mix.pdf,currency notation,lakh-style commas with 'Rs.' prefixes instead of a bare number,APPROVE,Indian digit grouping and an 'Rs.' prefix are both ordinary
+m09_total_in_words.pdf,amount in words,the grand total also written out as words underneath,APPROVE,the words agree with the figure; extra text should not confuse the reader
+m10_roundoff.pdf,round-off line,a '-0.40' round-off makes subtotal + tax differ from the total,APPROVE,"0.40 is inside the 1 rupee rounding tolerance, and the round-off line explains it"
+m11_handwritten_qty.pdf,handwritten quantities,quantities set in a handwriting font,APPROVE,"still a digital text layer, so the characters are exact even though they look handwritten"
+m12_two_pages.pdf,two pages,line items continue on page 2 and the totals are only on page 2,APPROVE,"all pages of a digital PDF are read (up to 5), so the lines on page 2 and the totals are found and add up"
+m13_tax_inclusive.pdf,tax-inclusive prices,no separate tax column; GST is already inside the prices,APPROVE,"the note states the rate, so the tax can be backed out of the total"
+m14_igst_interstate.pdf,IGST not CGST+SGST,a single IGST line instead of the usual CGST/SGST pair,APPROVE,"the vendor is in Karnataka and we are in Tamil Nadu, so IGST is the correct tax"
+m15_po_in_footnote.pdf,PO hidden in a footnote,no PO field; the order is mentioned as 'your order 2026/0106',REVIEW,"a PO the app had to infer is never auto-approved, by design"
+m16_bad_arithmetic.pdf,vendor's maths is wrong,line 1: quantity x rate does not equal the printed amount,REJECT,a digital PDF is never repaired - a broken identity there is the vendor's error
+m17_gstin_typo.pdf,GSTIN letter/digit confusion,"GSTIN printed as O7ABEFS2207MIZ4 (O for 0, I for 1)",REVIEW,"the 'O' sits in a digit-only position and is repaired, but the 'I' sits in the entity-code position where a letter is also legal, so the checksum cannot prove a repair and a person is asked"
+m18_duplicate_trap.pdf,duplicate in disguise,"re-bills INV-0042 as 'INV - 0042 / A', same date and amount",REVIEW,"the '/A' suffix defeats the exact-number check, so only the amount+date fallback catches it as a possible duplicate"
+m19_hindi_english.pdf,bilingual labels,every label given in Hindi and English together,APPROVE,digital text layer; the English half of each label is enough to find the fields
+m20_photo_perspective.pdf,phone photo,"perspective tilt, uneven lighting, shadow in the bottom-right corner",REVIEW,a photo is the hardest input; unreadable fields go to a person rather than being guessed

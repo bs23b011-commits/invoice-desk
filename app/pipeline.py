@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from . import (agent, checks, compliance, decision, erp, extract_llm, extract_rules, integrations, learning, matching,
                risk, store)
-from . import config
+from . import config, files
 from .config import MIN_FIELD_CONFIDENCE, REPAIR_MIN_CORROBORATION, STAGE_DELAY
 from .reader import inspect, read_pdf
 from .utils import fmt_inr, norm_invoice_no
@@ -31,6 +31,18 @@ STAGES = [
 LIVE: dict[str, dict] = {}
 KEY_FIELDS = ["vendor_gstin", "invoice_number", "invoice_date", "total"]
 RANK = {"pass": 0, "info": 1, "warn": 2, "fail": 3}
+
+
+def unreadable_run(filename: str, reason: str, channel: dict | None = None) -> dict:
+    """A file that arrived but can't be read still gets a record, so it can't silently get lost."""
+    run = new_run(filename, None, channel)
+    LIVE.pop(run["id"], None)
+    for s in run["stages"]:
+        s["status"] = "skipped"
+    run["stages"][0].update(status="fail", findings=[dict(status="fail", text=reason)])
+    run.update(state="error", error=reason, duration=0)
+    store.save_run(run)
+    return run
 
 
 def new_run(filename: str, sample: str | None, channel: dict | None = None) -> dict:
@@ -95,7 +107,8 @@ def execute(run: dict, pdf: bytes):
         run["state"] = "done"
     except Exception as e:  # never leave a run hanging in the UI
         run["state"] = "error"
-        run["error"] = f"{type(e).__name__}: {e}"
+        run["error"] = files.friendly_error(e)  # what a person should do; the technical detail stays in the trace
+        run["error_detail"] = f"{type(e).__name__}: {e}"
         run["trace"] = traceback.format_exc()
         for s in run["stages"]:
             if s["status"] in ("pending", "running"):
@@ -147,8 +160,6 @@ def _execute(run: dict, pdf: bytes):
         store.file_path(run["id"], "png").write_bytes(info["preview_png"])
         st.s["data"] = dict(bytes=len(pdf), pages=info["pages"], sha256=info["sha256"][:16], text_chars=info["chars"])
         st.add("pass", f"{run['filename']}, {len(pdf)/1024:.0f} KB, {info['pages']} page(s)")
-        if info["pages"] > 1:
-            st.add("info", "Multi-page PDF: only page 1 is read in this version")
         prev = store.seen_hash(info["sha256"], run["id"])
         if prev:
             st.add("info", f"This exact file was processed before (run {prev['id']}, decision {prev['decision']})")
@@ -170,6 +181,14 @@ def _execute(run: dict, pdf: bytes):
                 st.add("warn", "Low OCR confidence - scan quality is poor", code="OCR_QUALITY")
         else:
             st.add("pass", f"Read {len(doc.words)} words directly from the PDF text layer (exact)")
+        if doc.pages > 1:
+            if doc.pages_read >= doc.pages:
+                st.add("pass", f"Read all {doc.pages} pages")
+            else:
+                st.add("warn", f"{doc.pages}-page invoice: only page{'s 1-' + str(doc.pages_read) if doc.pages_read > 1 else ' 1'} "
+                               f"could be read (scanned pages after the first are not read in this version). A person "
+                               f"should check the lines and total on the rest", code="PAGES_UNREAD",
+                       facts=dict(pages=doc.pages, read=doc.pages_read))
 
     # 3 ── extract ---------------------------------------------------------------------------------
     with Stage(run, "extract") as st:
@@ -385,6 +404,11 @@ def _execute(run: dict, pdf: bytes):
                                            compliance.load_gstr2b(store.DATA / "gstr2b.json"), facts)
         for x in fs:
             st.add(**x)
+        cur = compliance.foreign_currency(doc.text)
+        if cur:
+            st.add("warn", f"Amounts are in {cur}, not rupees. This desk pays INR invoices only; a foreign-currency "
+                           "payment needs an exchange rate, a forex remittance and different tax treatment",
+                   code="FOREIGN_CURRENCY", facts=dict(currency=cur))
         st.s["data"] = tdata
         findings_by_stage["tax"] = st.s["findings"]
 
@@ -410,7 +434,9 @@ def _execute(run: dict, pdf: bytes):
                               lines=[dict(description=l["description"], qty=l["qty"], unit_price=l["unit_price"],
                                           amount=l["amount"], hsn=l.get("hsn")) for l in net_lines],
                               taxes=[dict(type=t["type"], rate=t.get("rate"), amount=t["amount"]) for t in inv["taxes"]],
-                              repaired=bool(repair))
+                              repaired=bool(repair),
+                              bank=inv.get("bank"),  # as printed on the invoice; payment always uses the master's
+                              vendor_name=inv.get("vendor_name"), vendor_gstin=inv.get("vendor_gstin"))
         run["result"] = res
         run["vendor"] = shown
         run["total"] = inv.get("total")
@@ -446,6 +472,15 @@ def resolve(run_id: str, action: str, note: str, who: str = "AP reviewer", via: 
     """A person makes the final call. With human approval on, that's every invoice: the agent's APPROVE,
     REVIEW and REJECT are all recommendations. Overriding a REJECT (approving anyway) needs a written reason."""
     run = store.get_run(run_id)
+    if run and run.get("state") == "error" and not run.get("resolution"):  # a file nobody could read
+        if action != "reject":
+            raise ValueError("This file couldn't be read, so it can't be approved. Dismiss it and ask the vendor for a readable copy")
+        run["resolution"] = dict(action="REJECT", note=note or "Unreadable file dismissed", by=who, via=via,
+                                 at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        store.save_run(run)
+        store.add_event(run_id, "resolved", f"Unreadable file dismissed by {who}" + (f": {note}" if note else ""),
+                        dict(action="REJECT", by=who, via=via))
+        return run
     if not run or not run.get("result"):
         raise ValueError("Only invoices waiting for a person can be approved or rejected")
     res = run["result"]

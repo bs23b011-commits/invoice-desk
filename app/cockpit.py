@@ -29,6 +29,8 @@ def _day(iso):
 
 def needs_person(run: dict) -> bool:
     res = run.get("result") or {}
+    if run.get("state") == "error":  # a file nobody could read must not disappear
+        return not run.get("resolution")
     return (run.get("state") == "done" and not run.get("resolution")
             and (res.get("decision") == "REVIEW" or bool(res.get("awaiting_human"))))
 
@@ -97,7 +99,21 @@ def _impact(res: dict) -> str:
     return f"{fmt_inr(inv.get('net_payable') or inv.get('total'))} would be posted and scheduled for {_day(inv.get('due_date')) or 'its due date'}"
 
 
+def unreadable_card(run: dict) -> dict:
+    ch = run.get("channel") or {}
+    return dict(id=run["id"], recommendation="UNREADABLE", vendor=ch.get("sender") or run.get("filename"),
+                invoice_number=run.get("filename"), total=None, total_text="—", due=None, due_date=None,
+                channel=(ch.get("channel") or "upload").replace("_", " "), created=run.get("created"), duration=None,
+                note=run.get("error") or "This file couldn't be read.", checks=[], match=dict(po_number=None, how=None, lines=[]),
+                risk=dict(score=0, level=None, signals=[]),
+                owner=dict(name="AP reviewer", sub="Ask the sender for a readable copy", question=None, due=None,
+                           escalate_to=None), thread=[], impact="Nothing can be posted or paid until a readable copy arrives.",
+                needs_phone_check=False, msme=False, stages_done=0, reply_examples=[], onboard=None)
+
+
 def card(run: dict) -> dict:
+    if run.get("state") == "error":
+        return unreadable_card(run)
     res = run["result"]
     inv = res.get("invoice") or {}
     risk = next((s.get("data") or {} for s in run.get("stages") or [] if s["key"] == "risk"), {})
@@ -118,7 +134,9 @@ def card(run: dict) -> dict:
                                      signals=[s["label"] for s in risk.get("signals") or []]),
         owner=_owner(run), thread=thread, impact=_impact(res), needs_phone_check=bool(codes & SENSITIVE),
         msme=bool(inv.get("msme_deadline")), stages_done=sum(1 for s in run.get("stages") or [] if s.get("status")),
-        reply_examples=agent.simulate_examples(run) if res["decision"] == "REVIEW" else [])
+        reply_examples=agent.simulate_examples(run) if res["decision"] == "REVIEW" else [],
+        onboard=dict(name=inv.get("vendor_name") or "", gstin=inv.get("vendor_gstin") or "",
+                     bank=inv.get("bank") or "") if "VENDOR_UNKNOWN" in codes else None)
 
 
 def waiting() -> dict:
@@ -127,7 +145,7 @@ def waiting() -> dict:
         run = store.get_run(r["id"])
         if run and needs_person(run):
             items.append(card(run))
-    order = {"REJECT": 0, "REVIEW": 1, "APPROVE": 2}
+    order = {"UNREADABLE": 0, "REJECT": 0, "REVIEW": 1, "APPROVE": 2}
     items.sort(key=lambda c: (not c["msme"], order.get(c["recommendation"], 3), c["due_date"] or "9999"))
     return dict(items=items, total=sum(c["total"] or 0 for c in items), total_text=fmt_inr(sum(c["total"] or 0 for c in items)),
                 human_approval=config.human_approval(), approver=config.APPROVER)

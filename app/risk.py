@@ -46,7 +46,8 @@ def _same_bank(a: str, b: str, ocr: bool) -> tuple[bool, bool]:
     """(same, ocr_near): ocr_near means one digit differs on a scan - treat as a misread, not a change."""
     ba, la = a.rsplit(" ", 1)
     bb, lb = b.rsplit(" ", 1)
-    if ba != bb:
+    core = lambda n: re.sub(r"\s*\bBANK(\s+(LTD|LIMITED))?\.?$", "", n.upper()).strip() or n.upper()
+    if core(ba) != core(bb):  # "ICICI" on the invoice is the same bank as "ICICI BANK" in the master
         return False, False
     diff = sum(x != y for x, y in zip(la, lb))
     if diff == 0:
@@ -63,7 +64,11 @@ def assess(inv: dict, text: str, vendor: dict | None, vendor_method: str | None,
 
     # 1. Bank details on the invoice vs the vendor master (business-email-compromise pattern)
     bank = inv.get("bank")
-    if vendor and bank:
+    if vendor and bank and not vendor.get("bank"):  # an imported vendor without an account on file
+        sig("bank_change", "No bank account on file for this vendor", 45,
+            f"Invoice asks for payment to {bank} and there is no account on file to compare it with. Confirm it "
+            "with the vendor on a known phone number, then add it to the vendor master")
+    elif vendor and bank:
         same, near = _same_bank(bank, _norm_bank(vendor["bank"].rsplit(" ", 1)[0]) + " " +
                                 vendor["bank"].rsplit(" ", 1)[1], source == "ocr")
         if not same:

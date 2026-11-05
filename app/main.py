@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from fastapi.responses import PlainTextResponse
 
-from . import agent, cockpit, config, erp, extract_llm, integrations, jeen, learning, pipeline, store
+from . import agent, cockpit, config, erp, extract_llm, files, integrations, jeen, learning, master, pipeline, store
 from .reader import read_pdf
 from .config import TOLERANCE_ABS, TOLERANCE_PCT
 from .matching import po_consumption
@@ -69,14 +69,16 @@ async def create_run(sample: str | None = Form(None), file: UploadFile | None = 
         data, name, sample_name = p.read_bytes(), sample, sample
     else:
         raise HTTPException(400, "Upload a PDF or pick a sample")
-    if not data.startswith(b"%PDF"):
-        raise HTTPException(400, "That file isn't a PDF. Upload the invoice as a PDF.")
     if len(data) > MAX_BYTES:
-        raise HTTPException(400, "PDF is larger than 10 MB")
+        raise HTTPException(400, "The file is larger than 10 MB")
+    try:
+        name, data, note = files.normalise(name, data)
+    except files.Unreadable as e:
+        raise HTTPException(400, str(e))
     run = pipeline.new_run(name, sample_name)
     store.file_path(run["id"], "pdf").write_bytes(data)
-    store.add_event(run["id"], "received", f"{name} {'picked from samples' if sample_name else 'uploaded'} in the app",
-                    dict(channel=run["channel"]["channel"], filename=name))
+    store.add_event(run["id"], "received", f"{name} {'picked from samples' if sample_name else 'uploaded'} in the app"
+                    + (f". {note}" if note else ""), dict(channel=run["channel"]["channel"], filename=name))
     threading.Thread(target=pipeline.execute, args=(run, data), daemon=True).start()
     return {"id": run["id"]}
 
@@ -164,9 +166,20 @@ async def intake(file: UploadFile = File(...), channel: str = Form("email"), sen
     _check_token(x_api_key)
     data = await file.read()
     name = file.filename or "invoice.pdf"
-    if not data.startswith(b"%PDF"):
-        store.add_event(None, "skipped", f"Ignored '{name}' from {sender or channel}: not a PDF", dict(filename=name))
-        return {"status": "skipped", "reason": "not a PDF"}
+    ch0 = dict(channel=channel, sender=sender, subject=subject, message_id=message_id, received_at=received_at)
+    if files.is_image(name, data) and not files.looks_like_document_photo(data):
+        store.add_event(None, "skipped", f"Ignored '{name}' from {sender or channel}: a small image (logo or signature)",
+                        dict(filename=name))
+        return {"status": "skipped", "reason": "small image, not an invoice"}
+    try:
+        name, data, note = files.normalise(name, data)
+    except files.Unreadable as e:
+        if not (data.startswith(b"%PDF") or files.is_image(name, data)):  # a signature logo, a .docx: not an invoice
+            store.add_event(None, "skipped", f"Ignored '{name}' from {sender or channel}: {e}", dict(filename=name))
+            return {"status": "skipped", "reason": str(e)}
+        run = pipeline.unreadable_run(name, str(e), ch0)  # an invoice we can't read must not get lost
+        store.add_event(run["id"], "received", f"{name} received by {channel} but can't be read: {e}", dict(ch0, filename=name))
+        return {"status": "unreadable", "run_id": run["id"], "reason": str(e)}
     if message_id:
         prev = store.find_run_by_message(message_id, name)
         if prev:  # n8n retried, or the mailbox was re-polled: never process the same attachment twice
@@ -279,6 +292,55 @@ def eval_report():
 def learned():
     gl = [dict(key=k, account=a, name=erp.ACCOUNTS.get(a)) for k, a in store.gl_memory().items()]
     return J(dict(layouts=store.all_layout_memory(), gl=gl, accounts=erp.ACCOUNTS))
+
+
+# ================================================================== bring your own vendors, POs, receipts
+@app.get("/api/master")
+def master_summary():
+    return J(master.summary())
+
+
+@app.get("/api/master/template/{kind}.csv")
+def master_template(kind: str):
+    if kind not in master.TEMPLATES:
+        raise HTTPException(404, "kind must be vendors, pos or receipts")
+    return Response(master.template_csv(kind), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{kind}_template.csv"'})
+
+
+@app.post("/api/master/import")
+async def master_import(kind: str = Form(...), file: UploadFile = File(...)):
+    """Upload vendors, purchase orders or goods receipts (CSV or .xlsx). Bad rows are listed, good rows kept."""
+    try:
+        rows = master.read_table(file.filename or "", await file.read())
+        return J(master.import_rows(kind, rows))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/master/clear")
+def master_clear():
+    return J(master.clear_imports())
+
+
+@app.post("/api/runs/{rid}/onboard")
+def onboard(rid: str, name: str = Form(...), gstin: str = Form(...), bank_name: str = Form(""),
+            account_number: str = Form(""), email: str = Form(""), msme: str = Form(""), terms_days: int = Form(30),
+            verified: str = Form(""), who: str = Form("Vendor master team")):
+    """A person onboards the vendor of an invoice stuck at 'vendor not onboarded', then the agent re-checks it.
+    The bank account must be confirmed with the vendor on a known number, never just copied from the invoice."""
+    run = store.get_run(rid)
+    if not run or not run.get("result"):
+        raise HTTPException(404, "Run not found")
+    if verified != "1":
+        raise HTTPException(400, "Confirm you verified the vendor's identity and bank account by phone or KYC documents")
+    try:
+        v = master.onboard_from_invoice(run, name, gstin, bank_name, account_number, email, msme == "1",
+                                        terms_days, (who or "Vendor master team")[:60])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    pipeline.reprocess(rid, {}, f"vendor {v['name']} onboarded by {who}")
+    return J(dict(vendor=v, run_id=rid))
 
 
 @app.get("/api/waiting")

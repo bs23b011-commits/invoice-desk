@@ -7,12 +7,14 @@ const REC = {
   APPROVE: { word: "Approve", tone: "approve", list: "Recommend approve" },
   REVIEW: { word: "Hold", tone: "review", list: "Recommend hold" },
   REJECT: { word: "Reject", tone: "reject", list: "Recommend reject" },
+  UNREADABLE: { word: "Get a readable copy", tone: "reject", list: "Can't read this file" },
 };
 const ICON = {
   ok: `<svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`,
   bad: `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
   warn: `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><path d="M12 6v7"/><path d="M12 18h.01"/></svg>`,
   agent: `<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4"/><circle cx="9.5" cy="13.5" r="1"/><circle cx="14.5" cy="13.5" r="1"/></svg>`,
+  alert: `<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6"/><path d="M12 17h.01"/></svg>`,
   clock: `<svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
 };
 const initials = (s) => String(s || "?").replace(/\(.*?\)/g, "").split(/[\s/]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
@@ -95,6 +97,7 @@ function renderDetail() {
     $("#w-go-process").addEventListener("click", () => show("process"));
     return;
   }
+  if (x.recommendation === "UNREADABLE") return renderUnreadable(x);
   const r = REC[x.recommendation];
   const checks = x.checks.map((c) => {
     const t = c.ok ? "ok" : c.status === "fail" ? "bad" : "warn";
@@ -133,11 +136,74 @@ function renderDetail() {
         <button type="button" class="w-btn ghost" id="w-open">Open full details</button>
       </div>
       <div class="muted small">Nothing is posted or paid until you decide.</div>
-    </div>`;
+    </div>
+    ${x.onboard ? onboardHtml(x.onboard) : ""}`;
   side.innerHTML = sideHtml(x);
   el.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => decide(x, b.dataset.act)));
   $("#w-open").addEventListener("click", () => { state.open = new Set(["decision"]); state.lastStatus = {}; show("process"); openRun(x.id); });
   bindSim(x);
+  if (x.onboard) bindOnboard(x);
+}
+
+function renderUnreadable(x) {
+  $("#w-detail").innerHTML = `
+    <div class="w-card w-head"><div class="w-head-l"><div class="mono muted small">${esc(x.invoice_number || "")} · ${esc(x.channel)}</div>
+      <h1>${esc(x.vendor || "Unknown sender")}</h1></div></div>
+    <div class="w-agent reject"><div class="w-agent-icon">${ICON.alert}</div>
+      <div><div class="eyebrow tone">Can't read this file</div><p>${esc(x.note)}</p></div></div>
+    <div class="w-card w-act">
+      <div class="small">${esc(x.impact)}</div>
+      <label class="w-note">Note (optional)<input type="text" id="w-note" placeholder="e.g. asked the vendor for a new copy"></label>
+      <label class="w-note w-who">Deciding as <input type="text" id="w-who" value="${esc(localGet("who") || "AP manager")}" aria-label="Your name"></label>
+      <div class="w-btns"><button type="button" class="w-btn reject" data-act="reject">Dismiss: asked for a new copy</button></div>
+      <div class="muted small">It stays in Records, so nothing that arrived is ever lost.</div>
+    </div>`;
+  $("#w-side").innerHTML = sideHtml(x);
+  $("#w-detail").querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => decide(x, b.dataset.act)));
+}
+
+function onboardHtml(o) {
+  const bankName = (o.bank || "").split(" ****")[0];
+  return `<div class="w-card w-onboard"><div class="eyebrow">Onboard this vendor</div>
+    <p class="small muted">The agent held this invoice because the vendor isn't in the vendor master. If it's a real supplier,
+      add it here and the agent re-checks the invoice. The bank account must come from the vendor's KYC or a phone call,
+      not from the invoice.</p>
+    <div class="w-onb-grid">
+      <label class="w-note">Legal name<input id="onb-name" value="${esc(o.name)}"></label>
+      <label class="w-note">GSTIN<input id="onb-gstin" value="${esc(o.gstin)}" class="mono"></label>
+      <label class="w-note">Bank<input id="onb-bank" value="${esc(bankName)}" placeholder="e.g. ICICI Bank"></label>
+      <label class="w-note">Account number (confirmed)<input id="onb-acct" inputmode="numeric" placeholder="${o.bank ? "invoice says " + esc(o.bank) : "full account number"}"></label>
+      <label class="w-note">Email<input id="onb-email" type="email" placeholder="accounts@vendor.com"></label>
+      <label class="w-note">Payment terms (days)<input id="onb-terms" type="number" value="30" min="0" max="180"></label>
+    </div>
+    <label class="w-verify"><input type="checkbox" id="onb-msme"> MSME vendor (Udyam registered: must be paid within 45 days)</label>
+    <label class="w-verify"><input type="checkbox" id="onb-verified"> I verified this vendor's identity and bank account (KYC documents or a call on a known number)</label>
+    <div class="w-btns"><button type="button" class="w-btn ghost" id="onb-go">Onboard vendor &amp; re-check invoice</button></div>
+  </div>`;
+}
+
+function bindOnboard(x) {
+  $("#onb-go").addEventListener("click", async () => {
+    const fd = new FormData();
+    fd.append("name", $("#onb-name").value); fd.append("gstin", $("#onb-gstin").value);
+    fd.append("bank_name", $("#onb-bank").value); fd.append("account_number", $("#onb-acct").value);
+    fd.append("email", $("#onb-email").value); fd.append("terms_days", $("#onb-terms").value || "30");
+    fd.append("msme", $("#onb-msme").checked ? "1" : ""); fd.append("verified", $("#onb-verified").checked ? "1" : "");
+    fd.append("who", ($("#w-who")?.value || "Vendor master team").trim());
+    W.busy = true;
+    $("#onb-go").disabled = true;
+    try {
+      const j = await api(`/api/runs/${x.id}/onboard`, { method: "POST", body: fd });
+      toast(`${j.vendor.name} added to the vendor master. Re-checking the invoice…`);
+      for (let i = 0; i < 60; i++) {
+        const run = await api(`/api/runs/${x.id}`);
+        if (run.state !== "running") break;
+        await new Promise((ok) => setTimeout(ok, 300));
+      }
+    } catch (e) { toast(e.message); $("#onb-go").disabled = false; }
+    W.busy = false;
+    await refreshWaiting();
+  });
 }
 
 // the email as the person reads it, without the greeting, the [Ref] reminder and the signature

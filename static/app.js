@@ -561,6 +561,7 @@ document.addEventListener("click", async (e) => {
 
 /* ---------------------------------------------------------------- records */
 async function loadRecords() {
+  if (typeof loadMaster === "function") loadMaster();
   const d = await api("/api/reference");
   try {
     const ig = await api("/api/integrations");

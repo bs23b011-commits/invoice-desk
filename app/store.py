@@ -81,6 +81,7 @@ def init(reset: bool = False):
             for g in load_json("goods_receipts.json"):
                 c.execute("INSERT INTO grn(grn, po_number, description, qty, date, source) VALUES(?,?,?,?,?,?)",
                           (g["grn"], g["po_number"], g["description"], g["qty"], g["date"], "warehouse system"))
+        seed_imports = c.execute("SELECT COUNT(*) FROM grn WHERE source='imported'").fetchone()[0] == 0
         c.execute("""CREATE TABLE IF NOT EXISTS events(
             id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, run_id TEXT, kind TEXT, text TEXT, data TEXT)""")
         n = c.execute("SELECT COUNT(*) FROM ledger").fetchone()[0]
@@ -91,6 +92,18 @@ def init(reset: bool = False):
                           (h["vendor_id"], h["invoice_number"], h["invoice_date"], h["po_number"], h["subtotal"],
                            h["tax"], h["total"], h["status"], json.dumps(h["lines"]), None, "history",
                            h["invoice_date"]))
+
+
+    from . import master  # vendors, POs and receipts the user imported survive a reset
+    master.apply()
+    if seed_imports:
+        master.seed_receipts()
+
+
+def insert_receipt(grn: str, po_number: str, description: str, qty: float, when: str, source: str):
+    with _lock, _conn() as c:
+        c.execute("INSERT INTO grn(grn, po_number, description, qty, date, source) VALUES(?,?,?,?,?,?)",
+                  (grn, po_number, description, qty, when, source))
 
 
 def ledger() -> list[dict]:

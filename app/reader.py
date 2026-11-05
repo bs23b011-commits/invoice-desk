@@ -31,6 +31,7 @@ class Word:
     bottom: float
     conf: float = 100.0
     page_box: tuple | None = None  # (x0, top, x1, bottom) on the page as shown, if different from layout coords
+    page: int = 0  # 0 = first page (the one shown); later pages are stacked below it in layout coordinates
 
 
 @dataclass
@@ -65,10 +66,11 @@ class Document:
     page_h: float = 842.0
     has_hindi: bool = False
     ocr_lang: str = ""
+    pages_read: int = 1
 
     def box(self, words) -> list | None:
         """Bounding box of some words as fractions of the page, for highlighting on the preview."""
-        words = [w for w in words if w is not None]
+        words = [w for w in words if w is not None and w.page == 0]  # only page 1 is shown for highlighting
         if not words:
             return None
         bs = [w.page_box or (w.x0, w.top, w.x1, w.bottom) for w in words]
@@ -99,6 +101,9 @@ def group_lines(words: list[Word], tol: float = 3.5) -> list[Line]:
     return sorted(out, key=lambda l: l.top)
 
 
+MAX_PAGES = 5
+
+
 def _render(pdf_bytes: bytes, scale: float):
     doc = pdfium.PdfDocument(pdf_bytes)
     return doc[0].render(scale=scale).to_pil()
@@ -123,14 +128,22 @@ def read_pdf(pdf_bytes: bytes, force_ocr: bool = False, preview: bool = True) ->
         raw = page.extract_words(keep_blank_chars=False, use_text_flow=False, x_tolerance=1.5)
         chars = len(page.chars)
         pw, ph = float(page.width), float(page.height)
+        more = []  # digital multi-page invoices: line items and totals often continue on page 2+
+        for i, pg in enumerate(pdf.pages[1:MAX_PAGES], start=1):
+            if len(pg.chars) < 40:
+                break  # a scanned later page: not read (flagged by the pipeline)
+            off = sum(float(x.height) for x in pdf.pages[:i])
+            more += [Word(w["text"], w["x0"], w["x1"], w["top"] + off, w["bottom"] + off, page=i)
+                     for w in pg.extract_words(keep_blank_chars=False, use_text_flow=False, x_tolerance=1.5)]
 
     buf = io.BytesIO()
     if preview:
         _render(pdf_bytes, 1.6).convert("RGB").save(buf, "PNG", optimize=True)
 
     if chars >= 40 and not force_ocr:
-        words = [Word(w["text"], w["x0"], w["x1"], w["top"], w["bottom"]) for w in raw]
+        words = [Word(w["text"], w["x0"], w["x1"], w["top"], w["bottom"]) for w in raw] + more
         doc = Document("text-layer", n_pages, words, sha256=sha, preview_png=buf.getvalue(), char_count=chars)
+        doc.pages_read = 1 + len({w.page for w in more})
     else:
         doc = _ocr(pdf_bytes, n_pages, sha)
         doc.preview_png = buf.getvalue()

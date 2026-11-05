@@ -622,3 +622,19 @@ kbd { font-family: var(--mono); font-size: .75rem; border: 1px solid var(--rule)
   .jeen-launch { padding: 13px; }
   body.jeen-is-open .jeen-launch { display: none; }
 }
+
+/* ======================================================================== bring your own data + onboarding */
+.byod-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.byod-card { border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; background: var(--paper); display: flex; flex-direction: column; gap: 8px; }
+.byod-h { display: flex; justify-content: space-between; align-items: baseline; }
+.byod-h .mono { font-size: 1.3rem; font-weight: 700; }
+.byod-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.byod-btns label.btn { cursor: pointer; }
+.byod-result { font-size: .85rem; }
+.byod-errors { margin: 6px 0 0; padding-left: 18px; color: var(--review); font-size: .8rem; }
+.byod-order { margin-top: 10px; }
+.ok-text { color: var(--approve); font-weight: 700; } .bad-text { color: var(--reject); font-weight: 600; }
+.linkish { background: none; border: 0; padding: 0; margin-left: 8px; color: var(--carbon); font: inherit; text-decoration: underline; cursor: pointer; }
+.w-onboard { display: flex; flex-direction: column; gap: 12px; border-color: var(--carbon); }
+.w-onb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.w-onboard .w-verify { color: var(--ink); font-weight: 500; }
