@@ -1,0 +1,172 @@
+{
+  "generated": "2026-11-05",
+  "invoices": 50,
+  "per_type": 5,
+  "seed": 7,
+  "decision_accuracy": 100.0,
+  "false_approvals": 0,
+  "silent_errors": 0,
+  "missed_approvals": 5,
+  "good_invoices": 10,
+  "field_accuracy": {
+    "invoice_number": 90.0,
+    "invoice_date": 100.0,
+    "po_number": 100.0,
+    "vendor": 100.0,
+    "subtotal": 100.0,
+    "total": 100.0,
+    "lines": 100.0
+  },
+  "layout_field_accuracy": {
+    "classic": 100.0,
+    "classic (scan)": 85.7,
+    "letter": 100.0,
+    "modern": 100.0
+  },
+  "situations": [
+    {
+      "situation": "clean",
+      "description": "Correct invoice, explicit PO",
+      "expected": "APPROVE",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "APPROVE": 5
+      }
+    },
+    {
+      "situation": "scan",
+      "description": "Correct invoice, fax-quality scan (REVIEW acceptable if unreadable)",
+      "expected": "APPROVE",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REVIEW": 5
+      }
+    },
+    {
+      "situation": "price_over",
+      "description": "One line priced 3% above the PO",
+      "expected": "REVIEW",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REVIEW": 5
+      }
+    },
+    {
+      "situation": "qty_over",
+      "description": "Bills more units than the PO allows",
+      "expected": "REVIEW",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REVIEW": 5
+      }
+    },
+    {
+      "situation": "no_po",
+      "description": "PO number missing",
+      "expected": "REVIEW",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REVIEW": 5
+      }
+    },
+    {
+      "situation": "duplicate",
+      "description": "Earlier invoice re-sent with the number re-formatted",
+      "expected": "REJECT",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REJECT": 5
+      }
+    },
+    {
+      "situation": "bad_math",
+      "description": "Digital invoice whose total doesn't add up",
+      "expected": "REJECT",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REJECT": 5
+      }
+    },
+    {
+      "situation": "bank_change",
+      "description": "Asks for payment to a new bank account",
+      "expected": "REVIEW",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REVIEW": 5
+      }
+    },
+    {
+      "situation": "blocked",
+      "description": "Vendor blocked in the master",
+      "expected": "REJECT",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REJECT": 5
+      }
+    },
+    {
+      "situation": "wrong_tax",
+      "description": "Same-state vendor charges IGST",
+      "expected": "REVIEW",
+      "n": 5,
+      "correct": 5,
+      "outcomes": {
+        "REVIEW": 5
+      }
+    }
+  ],
+  "checker": {
+    "tried": 125,
+    "caught": 100,
+    "missed_within_rounding": 25,
+    "missed_other": 0,
+    "rate": 80.0,
+    "rate_rupee_or_more": 100.0,
+    "missed_examples": []
+  },
+  "scans": {
+    "n": 5,
+    "repaired": 1,
+    "approved": 0
+  },
+  "avg_seconds": 0.66,
+  "total_seconds": 36.7,
+  "wrong": [],
+  "held": [
+    {
+      "id": "006_scan",
+      "got": "REVIEW",
+      "why": "Needs review: Missing information (+2 more). Low confidence reading invoice number (23%)"
+    },
+    {
+      "id": "007_scan",
+      "got": "REVIEW",
+      "why": "Needs review: Missing information (+1 more). Low confidence reading invoice number (28%)"
+    },
+    {
+      "id": "008_scan",
+      "got": "REVIEW",
+      "why": "Needs review: Missing information (+1 more). Could not find invoice number on the invoice"
+    },
+    {
+      "id": "009_scan",
+      "got": "REVIEW",
+      "why": "Needs review: Missing information (+1 more). Could not find invoice number on the invoice"
+    },
+    {
+      "id": "010_scan",
+      "got": "REVIEW",
+      "why": "Needs review: Missing information. Low confidence reading invoice number (55%)"
+    }
+  ]
+}

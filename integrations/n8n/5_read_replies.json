@@ -1,0 +1,128 @@
+{
+  "name": "Invoice Desk - 5. Read replies",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "subject:\"[Ref\" is:unread",
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "f74ad8d3-9806-560d-b6a7-c15aefeefa6e",
+      "name": "Replies in AP mailbox",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep only what the agent needs; strip the quoted original message below the reply.\nreturn $input.all().map((item) => {\n  const j = item.json;\n  const raw = j.text || j.textPlain || j.snippet || '';\n  const body = raw.split(/\\r?\\nOn .+wrote:|\\r?\\n-{2,}\\s*Original Message|\\r?\\n>/)[0].trim();\n  const sender = (j.from && j.from.value && j.from.value[0] && j.from.value[0].address) || (j.from && j.from.text) || '';\n  return { json: { gmail_id: j.id, reply: { sender, subject: j.subject || '', body } } };\n});\n"
+      },
+      "id": "c02735e3-d82d-5978-92e4-88215d07837d",
+      "name": "Reply fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.INVOICE_DESK_URL || 'http://localhost:8000').replace(/\\/$/, '') }}/api/replies",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.INVOICE_DESK_TOKEN || '' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.reply) }}",
+        "options": {}
+      },
+      "id": "53574933-7876-54d3-8d93-2e17ff05612a",
+      "name": "Give reply to the agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $('Reply fields').item.json.gmail_id }}"
+      },
+      "id": "979b4b26-f490-514f-a92f-1c51dc398241",
+      "name": "Mark reply as read",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Replies in AP mailbox": {
+      "main": [
+        [
+          {
+            "node": "Reply fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply fields": {
+      "main": [
+        [
+          {
+            "node": "Give reply to the agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Give reply to the agent": {
+      "main": [
+        [
+          {
+            "node": "Mark reply as read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Replies carrying [Ref <id>] go back to the agent, which reads them and re-checks the invoice."
+  }
+}

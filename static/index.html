@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="ink"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="4"/>
+    <feDisplacementMap in="SourceGraphic" scale="2.2"/></filter>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div>
+      <strong>Invoice Desk</strong>
+      <span class="brand-sub">Accounts payable, Meridian Foods</span>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-view="waiting" aria-selected="true">Waiting for you <span id="review-badge" class="badge" hidden></span></button>
+    <button role="tab" data-view="process" aria-selected="false">Process</button>
+    <button role="tab" data-view="dashboard" aria-selected="false">Dashboard</button>
+    <button role="tab" data-view="payments" aria-selected="false">Payments</button>
+    <button role="tab" data-view="records" aria-selected="false">Records</button>
+  </nav>
+  <div class="topbar-right">
+    <span id="reader-mode" class="reader-mode"></span>
+    <button id="theme" class="btn ghost small icon-btn" aria-label="Switch light or dark" title="Switch light or dark">
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <button id="reset" class="btn ghost small">Reset demo data</button>
+  </div>
+</header>
+
+<main>
+  <!-- WAITING FOR YOU: the agent recommends, a person decides ---------------------------->
+  <section id="view-waiting" class="view waiting">
+    <aside class="w-list" aria-label="Waiting for you">
+      <div class="w-total">
+        <div class="eyebrow">Waiting for you</div>
+        <div class="w-sum mono" id="w-sum">—</div>
+        <div class="muted small" id="w-count"></div>
+      </div>
+      <div id="w-items" class="w-items"></div>
+      <p class="keys muted small">Keys: <kbd>J</kbd>/<kbd>K</kbd> next/previous · <kbd>A</kbd> approve · <kbd>R</kbd> reject</p>
+    </aside>
+    <article class="w-detail" id="w-detail" aria-live="polite"></article>
+    <aside class="w-side" id="w-side" aria-label="Who can resolve it and the conversation"></aside>
+  </section>
+
+  <!-- PROCESS ------------------------------------------------------------------------------>
+  <section id="view-process" class="view process" hidden>
+    <aside class="inbox" aria-label="Inbox">
+      <h2>Inbox</h2>
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept="application/pdf" hidden>
+        <span class="drop-title">Drop an invoice PDF</span>
+        <span class="drop-sub">or choose a file</span>
+      </label>
+      <div id="samples"></div>
+    </aside>
+
+    <section class="run" aria-live="polite">
+      <div id="run-empty" class="empty">
+        <h1>Pick an invoice to process</h1>
+        <p>Each invoice is read, checked against itself, then against the vendor master, earlier invoices
+          and the purchase order. You'll see every step as it runs, and the decision with its reasons.</p>
+      </div>
+      <div id="run" hidden>
+        <div class="run-head">
+          <div>
+            <h1 id="run-title"></h1>
+            <p id="run-sub" class="muted"></p>
+          </div>
+          <span id="run-timer" class="timer"></span>
+        </div>
+        <div id="decision"></div>
+        <ol id="stages" class="stages"></ol>
+      </div>
+    </section>
+
+    <section class="doc" aria-label="Invoice as received">
+      <div class="paper" id="paper">
+        <div class="paper-empty">The invoice appears here</div>
+      </div>
+      <p class="doc-caption" id="doc-caption"></p>
+    </section>
+  </section>
+
+  <!-- DASHBOARD ---------------------------------------------------------------------------->
+  <section id="view-dashboard" class="view dashboard" hidden>
+    <div class="dash-summary" id="dash-summary"></div>
+    <div class="dash-grid">
+      <section class="panel" id="queue-panel">
+        <h2>Waiting for review</h2>
+        <div id="queue"></div>
+      </section>
+      <section class="panel">
+        <h2>Exceptions by type</h2>
+        <div id="exceptions"></div>
+      </section>
+    </div>
+    <section class="panel">
+      <h2>Purchase order balances</h2>
+      <div id="balances"></div>
+    </section>
+    <section class="panel">
+      <h2>Accuracy on invoices with known answers</h2>
+      <p class="muted panel-note">From the last run of <code>python scripts/evaluate.py</code>: fresh invoices in every situation, checked against the right answer.</p>
+      <div id="accuracy"></div>
+    </section>
+    <section class="panel">
+      <h2>Activity</h2>
+      <p class="muted panel-note">What came in, what went out, who answered, what escalated.</p>
+      <div id="activity"></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>All runs</h2>
+        <div class="filters" id="filters">
+          <button data-f="ALL" aria-pressed="true">All</button>
+          <button data-f="APPROVE" aria-pressed="false">Approved</button>
+          <button data-f="REVIEW" aria-pressed="false">Review</button>
+          <button data-f="REJECT" aria-pressed="false">Rejected</button>
+        </div>
+      </div>
+      <div id="history"></div>
+    </section>
+  </section>
+
+  <!-- PAYMENTS -------------------------------------------------------------------------------->
+  <section id="view-payments" class="view payments" hidden>
+    <div class="dash-summary" id="pay-summary"></div>
+    <section class="panel">
+      <div class="panel-head"><h2>Approved and posted, waiting to be paid</h2>
+        <button class="btn small" id="make-batch" disabled>Create payment batch</button></div>
+      <p class="muted panel-note">MSME vendors first (45-day law), then by due date. Payment always goes to the bank account in the vendor master.</p>
+      <div id="pay-open"></div>
+    </section>
+    <div class="dash-grid">
+      <section class="panel"><h2>Payment batches</h2><div id="pay-batches"></div></section>
+      <section class="panel"><h2>TDS to deposit</h2><p class="muted panel-note">Deducted from vendor payments; due to the government by the 7th of the next month.</p><div id="pay-tds"></div></section>
+    </div>
+  </section>
+
+  <!-- RECORDS ------------------------------------------------------------------------------>
+  <section id="view-records" class="view records" hidden>
+    <p class="muted records-intro" id="rules-intro"></p>
+    <section class="panel"><h2>Connections</h2>
+      <p class="muted panel-note">n8n moves the messages; every decision is made here. The app works fully without them.</p>
+      <div id="integrations"></div></section>
+    <section class="panel"><h2>What it has learned</h2>
+      <p class="muted panel-note">Labels and GL codes taught by reviewers. Each one shows who taught it and when.</p>
+      <div id="learned"></div></section>
+    <section class="panel"><h2>Vendor master</h2><div id="vendors"></div></section>
+    <section class="panel"><h2>Purchase orders</h2><div id="pos"></div></section>
+    <section class="panel"><h2>Invoice ledger</h2>
+      <p class="muted">Every invoice the process has accepted or sent to review. Duplicates are checked against this;
+        only approved invoices use up PO balance.</p>
+      <div id="ledger"></div></section>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="/static/app.js"></script>
+<script src="/static/waiting.js"></script>
+<script src="/static/jeen.js"></script>
+</body>
+</html>

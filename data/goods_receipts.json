@@ -1,0 +1,114 @@
+[
+  {
+    "grn": "GRN-2026-0001",
+    "po_number": "PO-2026-0098",
+    "description": "Printed product labels 100x50mm",
+    "qty": 20000,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0002",
+    "po_number": "PO-2026-0101",
+    "description": "Corrugated boxes 5-ply 480x320x300",
+    "qty": 5000,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0003",
+    "po_number": "PO-2026-0101",
+    "description": "Stretch wrap film roll 500mm",
+    "qty": 40,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0004",
+    "po_number": "PO-2026-0104",
+    "description": "Nitrile safety gloves (pair)",
+    "qty": 2000,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0005",
+    "po_number": "PO-2026-0104",
+    "description": "Anti-fog safety goggles",
+    "qty": 500,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0006",
+    "po_number": "PO-2026-0105",
+    "description": "Benchtop pH meter with probe",
+    "qty": 4,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0007",
+    "po_number": "PO-2026-0105",
+    "description": "Calibration buffer kit pH 4/7/10",
+    "qty": 10,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0008",
+    "po_number": "PO-2026-0106",
+    "description": "Hydraulic oil ISO VG 68 (20 L can)",
+    "qty": 30,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0009",
+    "po_number": "PO-2026-0106",
+    "description": "Lithium grease cartridge 400 g",
+    "qty": 200,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0010",
+    "po_number": "PO-2026-0107",
+    "description": "LED panel light 40W 2x2",
+    "qty": 60,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0011",
+    "po_number": "PO-2026-0107",
+    "description": "MCB 32A double pole",
+    "qty": 40,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0012",
+    "po_number": "PO-2026-0108",
+    "description": "Vinyl banners 6x3 ft printed",
+    "qty": 25,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0013",
+    "po_number": "PO-2026-0109",
+    "description": "Printed shrink sleeves 250 ml bottle",
+    "qty": 30000,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0014",
+    "po_number": "PO-2026-0110",
+    "description": "Industrial safety helmet with chin strap",
+    "qty": 200,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0015",
+    "po_number": "PO-2026-0113",
+    "description": "Jute sacks 50 kg",
+    "qty": 1000,
+    "date": "2026-10-20"
+  },
+  {
+    "grn": "GRN-2026-0016",
+    "po_number": "PO-2026-0113",
+    "description": "Polypropylene twine roll",
+    "qty": 50,
+    "date": "2026-10-20"
+  }
+]

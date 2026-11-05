@@ -1,0 +1,146 @@
+[
+  {
+    "file": "01_happy_sundaram_clean.pdf",
+    "kind": "happy",
+    "title": "Clean invoice, exact PO match",
+    "story": "Machine-readable PDF, explicit PO, quantities and prices match the PO exactly.",
+    "expect": "APPROVE",
+    "vendor": "Sundaram Packaging Solutions Pvt Ltd",
+    "total": 168150.0
+  },
+  {
+    "file": "02_happy_brightline_tolerance.pdf",
+    "kind": "happy",
+    "title": "Inter-state freight, small variance within tolerance",
+    "story": "Different layout, IGST instead of CGST/SGST, PO written as 'PO 2026/102'. The freight rate came in Rs.150/trip above the PO rate (+0.5%) - inside the 1% tolerance.",
+    "expect": "APPROVE",
+    "vendor": "Brightline Logistics LLP",
+    "total": 209922.0
+  },
+  {
+    "file": "03_happy_apex_tax_inclusive.pdf",
+    "kind": "happy",
+    "title": "Tax embedded in prices",
+    "story": "Small vendor quotes GST-inclusive rates. The process must back out the tax before comparing to the (pre-tax) PO.",
+    "expect": "APPROVE",
+    "vendor": "Apex Lab Instruments",
+    "total": 132160.0
+  },
+  {
+    "file": "04_happy_nimbus_partial_billing.pdf",
+    "kind": "happy",
+    "title": "One PO billed in parts (within balance)",
+    "story": "Annual hosting PO billed quarterly. Q1 is already paid; this Q2 invoice uses 1 of the 3 remaining quarters.",
+    "expect": "APPROVE",
+    "vendor": "Nimbus Cloud Services Pvt Ltd",
+    "total": 141600.0
+  },
+  {
+    "file": "05_edge_murugan_scanned.pdf",
+    "kind": "edge",
+    "title": "Fax-quality scan, OCR misreads a digit",
+    "story": "A faxed paper invoice with no text layer. The process OCRs it, then refuses to trust the OCR until the numbers reconcile. On this scan OCR reads CGST 8,676 as 6,676.",
+    "expect": "APPROVE or REVIEW (depends on OCR quality)",
+    "vendor": "Murugan Electricals",
+    "total": 113752.0
+  },
+  {
+    "file": "06_edge_kaveri_split_po_overbilled.pdf",
+    "kind": "edge",
+    "title": "Split PO - second invoice exceeds what's left",
+    "story": "PO-2026-0104 was partly billed earlier (1,200 gloves + 300 goggles). This invoice bills 1,000 more gloves, but only 800 remain on the PO.",
+    "expect": "REVIEW",
+    "vendor": "Kaveri Industrial Supplies",
+    "total": 152220.0
+  },
+  {
+    "file": "07_edge_sundaram_duplicate.pdf",
+    "kind": "edge",
+    "title": "Duplicate re-sent in a different format",
+    "story": "INV-0042 was already paid. The vendor re-sends it as a 'payment reminder' in a different layout and writes the number as 'INV42'. Same vendor, same amount, same PO.",
+    "expect": "REJECT",
+    "vendor": "Sundaram Packaging Solutions Pvt Ltd",
+    "total": 41300.0
+  },
+  {
+    "file": "08_edge_kaveri_no_po.pdf",
+    "kind": "edge",
+    "title": "No PO number on the invoice",
+    "story": "The vendor forgot the PO reference. The process finds the most likely PO from vendor, items and amount - but does not auto-approve a guessed match.",
+    "expect": "REVIEW",
+    "vendor": "Kaveri Industrial Supplies",
+    "total": 182900.0
+  },
+  {
+    "file": "09_extra_rapidprint_blocked_vendor.pdf",
+    "kind": "extra",
+    "title": "Vendor is blocked in the master",
+    "story": "Everything on the invoice is fine, but the vendor's KYC has expired, so payment must not go out.",
+    "expect": "REJECT",
+    "vendor": "Rapid Print & Signage",
+    "total": 41300.0
+  },
+  {
+    "file": "12_edge_kaveri_goods_not_received.pdf",
+    "kind": "edge",
+    "title": "Billed before all goods arrived",
+    "story": "Kaveri bills 300 helmets on PO-2026-0110, but the warehouse has only received 200. Payment waits for the goods. The agent asks Stores; when they reply that the rest arrived, it books the receipt and re-checks.",
+    "expect": "REVIEW",
+    "vendor": "Kaveri Industrial Supplies",
+    "total": 159300.0
+  },
+  {
+    "file": "13_edge_brightline_no_einvoice.pdf",
+    "kind": "edge",
+    "title": "Large vendor, no e-invoice (IRN)",
+    "story": "Brightline is above the \u20b95 crore e-invoicing limit but sent a plain PDF with no IRN. Without it the invoice isn't a valid tax invoice and \u20b922,320 of input tax credit is lost. The agent asks the vendor for the e-invoice; when it arrives the IRN is checked against the invoice and payment is released (less 2% TDS on freight).",
+    "expect": "REVIEW",
+    "vendor": "Brightline Logistics LLP",
+    "total": 146320.0
+  },
+  {
+    "file": "14_learn_nimbus_new_layout.pdf",
+    "kind": "learning",
+    "title": "New layout: reviewer teaches it once",
+    "story": "Nimbus switched billing systems. Its statement says 'Document Ref' and 'Dated', labels the reader has never seen, so the invoice number and date are missing. A reviewer types them in; the process finds them on the page, learns the labels for Nimbus, re-checks (the IRN confirms the typed number) and approves.",
+    "expect": "REVIEW, then APPROVE after the correction",
+    "vendor": "Nimbus Cloud Services Pvt Ltd",
+    "total": 17700.0
+  },
+  {
+    "file": "15_learn_nimbus_next_invoice.pdf",
+    "kind": "learning",
+    "title": "Same layout again: read automatically",
+    "story": "The next Nimbus statement in the same layout. After #14 has been corrected once, the learned labels read it with no help. Before that, it needs a reviewer too.",
+    "expect": "APPROVE once #14 was corrected (REVIEW before)",
+    "vendor": "Nimbus Cloud Services Pvt Ltd",
+    "total": 17700.0
+  },
+  {
+    "file": "16_hindi_ganesh_traders.pdf",
+    "kind": "language",
+    "title": "Invoice in Hindi",
+    "story": "A Delhi supplier's invoice with Hindi labels (\u092c\u0940\u091c\u0915 \u0938\u0902\u0916\u094d\u092f\u093e, \u0926\u093f\u0928\u093e\u0902\u0915, \u0915\u094d\u0930\u092f \u0906\u0926\u0947\u0936 \u0938\u0902\u0916\u094d\u092f\u093e, \u0915\u0941\u0932 \u092f\u094b\u0917), Hindi tax names (\u0906\u0908\u091c\u0940\u090f\u0938\u091f\u0940) and dates in Devanagari digits. Same checks, same decision: no special path.",
+    "expect": "APPROVE",
+    "vendor": "Shree Ganesh Traders",
+    "total": 46200.0
+  },
+  {
+    "file": "10_fraud_sundaram_bank_change.pdf",
+    "kind": "fraud",
+    "title": "Real vendor, new bank account",
+    "story": "A genuine-looking Sundaram invoice against a real open PO - everything matches, except it asks for payment to a NEW bank account. Classic business-email-compromise: hold and verify by phone.",
+    "expect": "REVIEW",
+    "vendor": "Sundaram Packaging Solutions Pvt Ltd",
+    "total": 84960.0
+  },
+  {
+    "file": "11_fraud_lookalike_vendor.pdf",
+    "kind": "fraud",
+    "title": "Look-alike vendor, different bank",
+    "story": "'Sundaram Packaging Solution' (no s) with a different GSTIN and bank account, quoting Sundaram's real PO number. An impostor - payment must be frozen, and no reply sent that tips them off.",
+    "expect": "REJECT",
+    "vendor": "Sundaram Packaging Solution Pvt. Ltd",
+    "total": 84960.0
+  }
+]

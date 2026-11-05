@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: invoice-desk
+    runtime: docker
+    plan: free
+    envVars:
+      - key: STAGE_DELAY
+        value: "0.45"

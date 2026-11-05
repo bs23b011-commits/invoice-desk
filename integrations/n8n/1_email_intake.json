@@ -1,0 +1,161 @@
+{
+  "name": "Invoice Desk - 1. Email intake",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "has:attachment filename:pdf",
+          "readStatus": "unread"
+        },
+        "options": {
+          "downloadAttachments": true,
+          "dataPropertyAttachmentsPrefixName": "attachment_"
+        }
+      },
+      "id": "815d9d42-5caf-541e-bf49-a7c86ba01fad",
+      "name": "AP mailbox (Gmail)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per PDF attachment, carrying the email details Invoice Desk records.\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  for (const [key, bin] of Object.entries(item.binary || {})) {\n    const name = bin.fileName || key;\n    const isPdf = (bin.mimeType || '').includes('pdf') || name.toLowerCase().endsWith('.pdf');\n    if (!isPdf) continue;\n    out.push({\n      json: {\n        sender: (j.from && (j.from.text || (j.from.value && j.from.value[0] && j.from.value[0].address))) || '',\n        subject: j.subject || '', message_id: j.messageId || j.id || '', gmail_id: j.id,\n        received_at: j.date || '', filename: name,\n      },\n      binary: { data: bin },\n    });\n  }\n}\nreturn out;\n"
+      },
+      "id": "e75259b9-1960-5c83-bd52-98592ce73499",
+      "name": "One item per PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.INVOICE_DESK_URL || 'http://localhost:8000').replace(/\\/$/, '') }}/api/intake",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.INVOICE_DESK_TOKEN || '' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "channel",
+              "value": "email"
+            },
+            {
+              "name": "sender",
+              "value": "={{ $json.sender }}"
+            },
+            {
+              "name": "subject",
+              "value": "={{ $json.subject }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $json.message_id }}"
+            },
+            {
+              "name": "received_at",
+              "value": "={{ $json.received_at }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "dd31de6c-d6f7-5878-8564-5f6a60938ba4",
+      "name": "Send to Invoice Desk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $('One item per PDF').item.json.gmail_id }}"
+      },
+      "id": "4b4a3a9f-a1d6-5e80-b944-03073daf84ed",
+      "name": "Mark email as read",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "AP mailbox (Gmail)": {
+      "main": [
+        [
+          {
+            "node": "One item per PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per PDF": {
+      "main": [
+        [
+          {
+            "node": "Send to Invoice Desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Invoice Desk": {
+      "main": [
+        [
+          {
+            "node": "Mark email as read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Polls the AP mailbox every minute; each PDF attachment becomes one Invoice Desk run."
+  }
+}

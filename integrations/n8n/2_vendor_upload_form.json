@@ -1,0 +1,148 @@
+{
+  "name": "Invoice Desk - 2. Vendor upload form",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Submit an invoice to Meridian Foods",
+        "formDescription": "Upload your invoice as a PDF. Please quote our purchase order number on the invoice.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Invoice PDF",
+              "fieldType": "file",
+              "acceptFileTypes": ".pdf",
+              "requiredField": true,
+              "multipleFiles": false
+            },
+            {
+              "fieldLabel": "Your email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Company name",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "6c357f4f-7ddf-5c1e-a596-5d3751bf6dfb",
+      "name": "Vendor invoice form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "878c6160-5717-5198-a341-47ecd0d5d10e"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.INVOICE_DESK_URL || 'http://localhost:8000').replace(/\\/$/, '') }}/api/intake",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.INVOICE_DESK_TOKEN || '' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "Invoice_PDF"
+            },
+            {
+              "name": "channel",
+              "value": "vendor portal"
+            },
+            {
+              "name": "sender",
+              "value": "={{ $json['Your email'] }}"
+            },
+            {
+              "name": "subject",
+              "value": "={{ 'Vendor portal: ' + $json['Company name'] }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $execution.id }}"
+            },
+            {
+              "name": "received_at",
+              "value": "={{ $json.submittedAt }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "dd31de6c-d6f7-5878-8564-5f6a60938ba4",
+      "name": "Send to Invoice Desk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Thank you, your invoice was received",
+        "completionMessage": "={{ 'Reference: ' + $json.run_id + '. We will be in touch only if we need anything.' }}",
+        "options": {}
+      },
+      "id": "1aa33af4-9189-5454-aa80-d559fe38ae9f",
+      "name": "Thank the vendor",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Vendor invoice form": {
+      "main": [
+        [
+          {
+            "node": "Send to Invoice Desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Invoice Desk": {
+      "main": [
+        [
+          {
+            "node": "Thank the vendor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "A public form vendors can use instead of email. Same intake, channel = vendor portal."
+  }
+}

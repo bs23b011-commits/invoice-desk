@@ -1,0 +1,452 @@
+{
+  "name": "Invoice Desk - 3. Notify decisions",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-desk",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "885be451-66b8-5098-aaa1-ab6d86696ac7",
+      "name": "Invoice Desk decision",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b2d6c8ce-621d-5ddf-a6d9-c5aa06b1e073"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ROUTING TABLE - edit these to your people and channels.\nconst ROUTES = {\n  'AP reviewer':            { email: 'ap-team@yourcompany.com',      slack: '#ap-approvals' },\n  'Procurement (PO owner)': { email: 'procurement@yourcompany.com',  slack: '#procurement' },\n  'Vendor master team':     { email: 'vendor-master@yourcompany.com', slack: '#vendor-master' },\n  'Tax team':               { email: 'tax@yourcompany.com',          slack: '#tax' },\n  'Finance controller':     { email: 'controller@yourcompany.com',   slack: '#finance-alerts' },\n  'Category manager':       { email: 'category@yourcompany.com',     slack: '#procurement' },\n  'CFO':                    { email: 'cfo@yourcompany.com',          slack: '#finance-alerts' },\n  'Stores / receiving':     { email: 'stores@yourcompany.com',       slack: '#stores' },\n};\nconst FEED = '#ap-feed';            // approvals and resolutions are posted here\nconst fallback = ROUTES['AP reviewer'];\n\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nreturn $input.all().map((item) => {\n  const b = item.json.body || item.json;            // webhook puts the payload under body\n  if (b.event === 'agent.message') {                // the agent writing to a vendor (address on file) or a team\n    const m = b.message;\n    const internal = m.party.startsWith('internal:');\n    const route = internal ? (ROUTES[m.party.slice(9)] || fallback) : null;\n    return { json: { event: b.event, decision: null, owner: m.party, run_id: b.run_id,\n      email_to: internal ? route.email : m.to, email_subject: m.subject,\n      email_html: `<div style=\"font:14px/1.5 system-ui;white-space:pre-wrap\">${esc(m.body)}</div>`,\n      slack_channel: internal ? route.slack : FEED,\n      slack_text: `:speech_balloon: Agent wrote to ${internal ? m.party.slice(9) : m.to}: ${m.subject}\\n<${b.url}|Open>` } };\n  }\n  const head = `${b.vendor} - invoice ${b.invoice_number || '?'} for ${b.total_text}`;\n  const first = (b.handoff || [])[0];\n  const owner = b.event === 'invoice.resolved' ? null : (first ? first.owner : null);\n  const route = owner ? (ROUTES[owner] || fallback) : null;\n  let slack, subject, html;\n  if (b.event === 'invoice.resolved') {\n    const r = b.resolution || {};\n    slack = `:white_check_mark: *${r.action === 'APPROVE' ? 'Approved' : 'Rejected'}* by ${r.by} (${r.via})\\n${head}${r.note ? `\\n> ${r.note}` : ''}\\n<${b.url}|Open in Invoice Desk>`;\n  } else if (b.decision === 'APPROVE' && b.approval) {  // agent recommends approval; a person gives the final OK\n    const a = b.approval;\n    slack = `:large_green_circle: *Waiting for your OK* (agent recommends approval): ${head}\\n${b.next_action}\\n` +\n      `<${a.approve}|Approve payment> | <${a.reject}|Reject> | <${b.url}|Open>`;\n  } else if (b.decision === 'APPROVE') {\n    slack = `:large_green_circle: *Approved automatically*: ${head}\\n${b.next_action}\\n<${b.url}|Open>`;\n  } else {\n    const icon = b.decision === 'REJECT' ? ':red_circle: *Rejected*' : ':large_orange_circle: *On hold*';\n    const parts = (b.handoff || []).map((h) =>\n      `*${h.category}* (for ${h.owner})\\n${h.question}\\n_Answer by ${h.due_by.slice(0, 16).replace('T', ' ')} UTC, then escalates to ${h.escalate_to}_` +\n      (h.approve ? `\\n<${h.approve}|Approve> | <${h.reject}|Reject>` : ''));\n    slack = `${icon}: ${head}\\n${parts.join('\\n\\n')}\\n<${b.url}|Open in Invoice Desk>`;\n    subject = `[${b.decision === 'REJECT' ? 'Rejected' : 'Action needed'}] ${head}`;\n    html = `<p><b>${esc(head)}</b></p><p>${esc(b.headline)}</p>` + (b.handoff || []).map((h) =>\n      `<div style=\"border-left:4px solid ${h.severity === 'fail' ? '#b42318' : '#a86a12'};padding:6px 12px;margin:10px 0\">\n       <b>${esc(h.category)}</b> - for ${esc(h.owner)}<br><span style=\"font-size:16px\">${esc(h.question)}</span><br>\n       <small>Answer by ${esc(h.due_by.slice(0, 16).replace('T', ' '))} UTC, then it escalates to ${esc(h.escalate_to)}.</small>` +\n      (h.approve ? `<p><a href=\"${h.approve}\" style=\"background:#1f7a4d;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none\">Approve payment</a>\n       &nbsp; <a href=\"${h.reject}\" style=\"color:#b42318\">Reject invoice</a></p>` : '') + `</div>`).join('') +\n      `<p><a href=\"${b.url}\">Open the invoice in Invoice Desk</a></p>`;\n  }\n  return { json: { event: b.event, decision: b.decision, owner, slack_channel: route ? route.slack : FEED,\n                   email_to: route ? route.email : null, slack_text: slack, email_subject: subject || null,\n                   email_html: html || null, run_id: b.run_id } };\n});\n"
+      },
+      "id": "1302c48a-6893-52d6-a1a1-01d382958c39",
+      "name": "Format message + route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9817dd18-1ec9-5b80-858c-ef5f743a4e37",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "invoice.resolved",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Resolved by a person"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "5144a7f6-b863-5217-b873-0868b6ac47c6",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "REVIEW",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "On hold"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d98f4013-27c8-56c3-ac80-245c3b009877",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "REJECT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Rejected"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "220db9ce-5671-503a-9193-c2e9f6af998b",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "APPROVE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Approved"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b708b00d-1306-5361-87a2-7d9b9f31880d",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "agent.message",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Agent message"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a8acdcd0-8d73-52b5-978f-85c704ac5e71",
+      "name": "By decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.slack_channel }}",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_text }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "edfec3ec-200d-5252-90e7-3769d84f22d0",
+      "name": "Slack: resolution to feed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        760,
+        -240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.slack_channel }}",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_text }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "847951eb-f58f-5159-ac7e-a9bfdc6f94a9",
+      "name": "Slack: question to owner",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        760,
+        -60
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8fff3a53-dad9-5cda-9fba-de116e926985",
+              "leftValue": "={{ $json.email_to }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ca8a68c0-6004-5e02-98b0-c8c3ab97b7f8",
+      "name": "Owner has email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "86969f0b-c627-5a7c-af31-dd07218152e0",
+      "name": "Email: question to owner",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1240,
+        -60
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.slack_channel }}",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_text }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "c8ed3828-beb7-5bc4-9d87-094e36e20d2b",
+      "name": "Slack: rejection alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        760,
+        120
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "d5a5d990-baf7-5899-b6f3-cb5bdf61fe2c",
+      "name": "Email: rejection to owner",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1000,
+        120
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.slack_channel }}",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_text }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "09e684ce-08f3-5e2b-ab44-b41e56ce5554",
+      "name": "Slack: approved to feed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        760,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "61df2fea-3b74-5144-82b7-f14f18ed0b2a",
+      "name": "Email: agent message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        760,
+        480
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Invoice Desk decision": {
+      "main": [
+        [
+          {
+            "node": "Format message + route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format message + route": {
+      "main": [
+        [
+          {
+            "node": "By decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "By decision": {
+      "main": [
+        [
+          {
+            "node": "Slack: resolution to feed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: question to owner",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Owner has email?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: rejection alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email: rejection to owner",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: approved to feed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email: agent message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Owner has email?": {
+      "main": [
+        [
+          {
+            "node": "Email: question to owner",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Set N8N_WEBHOOK_URL on the app to this workflow's production webhook URL."
+  }
+}

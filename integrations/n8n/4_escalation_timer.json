@@ -1,0 +1,179 @@
+{
+  "name": "Invoice Desk - 4. Escalation timer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "cfc40e3d-7418-54dc-b8ee-de14ca42a11e",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.INVOICE_DESK_URL || 'http://localhost:8000').replace(/\\/$/, '') }}/api/escalations/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.INVOICE_DESK_TOKEN || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7899f959-8578-5253-84bf-199a8c5bcf2b",
+      "name": "Ask Invoice Desk what is overdue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "id": "284ed523-5c3e-5ed3-bec3-da37bb92d6b7",
+      "name": "One item per escalation",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ROUTING TABLE - edit these to your people and channels.\nconst ROUTES = {\n  'AP reviewer':            { email: 'ap-team@yourcompany.com',      slack: '#ap-approvals' },\n  'Procurement (PO owner)': { email: 'procurement@yourcompany.com',  slack: '#procurement' },\n  'Vendor master team':     { email: 'vendor-master@yourcompany.com', slack: '#vendor-master' },\n  'Tax team':               { email: 'tax@yourcompany.com',          slack: '#tax' },\n  'Finance controller':     { email: 'controller@yourcompany.com',   slack: '#finance-alerts' },\n  'Category manager':       { email: 'category@yourcompany.com',     slack: '#procurement' },\n  'CFO':                    { email: 'cfo@yourcompany.com',          slack: '#finance-alerts' },\n  'Stores / receiving':     { email: 'stores@yourcompany.com',       slack: '#stores' },\n};\nconst FEED = '#ap-feed';            // approvals and resolutions are posted here\nconst fallback = ROUTES['AP reviewer'];\n\nreturn $input.all().map((item) => {\n  const e = item.json;\n  const route = ROUTES[e.escalate_to] || fallback;\n  return { json: { ...e, slack_channel: route.slack, email_to: route.email,\n    slack_text: `:rotating_light: *Escalated to ${e.escalate_to}* - ${e.owner} has not answered for ${e.overdue_hours} h\\n` +\n                `${e.vendor} - invoice ${e.invoice_number} for ${e.total_text}\\n*${e.category}*: ${e.question}\\n` +\n                `<${e.approve}|Approve> | <${e.reject}|Reject> | <${e.url}|Open>`,\n    email_subject: `[Escalated] ${e.category}: ${e.vendor} ${e.invoice_number} (${e.total_text})`,\n    email_html: `<p><b>${e.owner}</b> has not answered for ${e.overdue_hours} hours, so this is now with you.</p>\n      <p><b>${e.vendor}</b> - invoice ${e.invoice_number} for <b>${e.total_text}</b></p>\n      <p style=\"font-size:16px\"><b>${e.category}</b>: ${e.question}</p>\n      <p><a href=\"${e.approve}\">Approve payment</a> &nbsp; <a href=\"${e.reject}\">Reject invoice</a> &nbsp; <a href=\"${e.url}\">Open</a></p>` } };\n});\n"
+      },
+      "id": "4f805f2a-5596-52d9-b13e-84ff13d4c514",
+      "name": "Route to escalation owner",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.slack_channel }}",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_text }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "ecf8035a-8192-56a6-8635-696b01058171",
+      "name": "Slack: escalation",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        960,
+        -80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "4ba8ec71-7177-5e60-a203-22ee3c0edaa8",
+      "name": "Email: escalation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        80
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "Ask Invoice Desk what is overdue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Invoice Desk what is overdue": {
+      "main": [
+        [
+          {
+            "node": "One item per escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per escalation": {
+      "main": [
+        [
+          {
+            "node": "Route to escalation owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route to escalation owner": {
+      "main": [
+        [
+          {
+            "node": "Slack: escalation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email: escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Each overdue question is escalated exactly once (Invoice Desk remembers)."
+  }
+}

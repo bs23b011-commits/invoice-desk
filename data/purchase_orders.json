@@ -1,0 +1,282 @@
+[
+  {
+    "po_number": "PO-2026-0098",
+    "vendor_id": "V001",
+    "date": "2026-09-20",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Printed product labels 100x50mm",
+        "qty": 20000,
+        "unit_price": 1.75,
+        "amount": 35000.0,
+        "hsn": "4821"
+      }
+    ],
+    "amount": 35000.0
+  },
+  {
+    "po_number": "PO-2026-0101",
+    "vendor_id": "V001",
+    "date": "2026-10-03",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Corrugated boxes 5-ply 480x320x300",
+        "qty": 5000,
+        "unit_price": 18.5,
+        "amount": 92500.0,
+        "hsn": "4819"
+      },
+      {
+        "description": "Stretch wrap film roll 500mm",
+        "qty": 40,
+        "unit_price": 1250.0,
+        "amount": 50000.0,
+        "hsn": "3920"
+      }
+    ],
+    "amount": 142500.0
+  },
+  {
+    "po_number": "PO-2026-0102",
+    "vendor_id": "V003",
+    "date": "2026-10-01",
+    "status": "open",
+    "lines": [
+      {
+        "description": "FTL freight Chennai to Bengaluru (32 ft)",
+        "qty": 6,
+        "unit_price": 28000.0,
+        "amount": 168000.0,
+        "hsn": "9965"
+      },
+      {
+        "description": "Loading and unloading charges",
+        "qty": 6,
+        "unit_price": 1500.0,
+        "amount": 9000.0,
+        "hsn": "9967"
+      }
+    ],
+    "amount": 177000.0
+  },
+  {
+    "po_number": "PO-2026-0103",
+    "vendor_id": "V004",
+    "date": "2026-04-01",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Managed cloud hosting quarterly fee FY26-27",
+        "qty": 4,
+        "unit_price": 120000.0,
+        "amount": 480000.0,
+        "hsn": "998315"
+      }
+    ],
+    "amount": 480000.0
+  },
+  {
+    "po_number": "PO-2026-0104",
+    "vendor_id": "V002",
+    "date": "2026-09-25",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Nitrile safety gloves (pair)",
+        "qty": 2000,
+        "unit_price": 85.0,
+        "amount": 170000.0,
+        "hsn": "4015"
+      },
+      {
+        "description": "Anti-fog safety goggles",
+        "qty": 500,
+        "unit_price": 220.0,
+        "amount": 110000.0,
+        "hsn": "9004"
+      }
+    ],
+    "amount": 280000.0
+  },
+  {
+    "po_number": "PO-2026-0105",
+    "vendor_id": "V005",
+    "date": "2026-10-02",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Benchtop pH meter with probe",
+        "qty": 4,
+        "unit_price": 23500.0,
+        "amount": 94000.0,
+        "hsn": "9027"
+      },
+      {
+        "description": "Calibration buffer kit pH 4/7/10",
+        "qty": 10,
+        "unit_price": 1800.0,
+        "amount": 18000.0,
+        "hsn": "3822"
+      }
+    ],
+    "amount": 112000.0
+  },
+  {
+    "po_number": "PO-2026-0106",
+    "vendor_id": "V002",
+    "date": "2026-10-08",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Hydraulic oil ISO VG 68 (20 L can)",
+        "qty": 30,
+        "unit_price": 4200.0,
+        "amount": 126000.0,
+        "hsn": "2710"
+      },
+      {
+        "description": "Lithium grease cartridge 400 g",
+        "qty": 200,
+        "unit_price": 145.0,
+        "amount": 29000.0,
+        "hsn": "3403"
+      }
+    ],
+    "amount": 155000.0
+  },
+  {
+    "po_number": "PO-2026-0107",
+    "vendor_id": "V007",
+    "date": "2026-10-06",
+    "status": "open",
+    "lines": [
+      {
+        "description": "LED panel light 40W 2x2",
+        "qty": 60,
+        "unit_price": 1150.0,
+        "amount": 69000.0,
+        "hsn": "9405"
+      },
+      {
+        "description": "MCB 32A double pole",
+        "qty": 40,
+        "unit_price": 385.0,
+        "amount": 15400.0,
+        "hsn": "8536"
+      },
+      {
+        "description": "Installation labour - packing hall",
+        "qty": 1,
+        "unit_price": 12000.0,
+        "amount": 12000.0,
+        "hsn": "9954"
+      }
+    ],
+    "amount": 96400.0
+  },
+  {
+    "po_number": "PO-2026-0108",
+    "vendor_id": "V006",
+    "date": "2026-09-10",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Vinyl banners 6x3 ft printed",
+        "qty": 25,
+        "unit_price": 1400.0,
+        "amount": 35000.0,
+        "hsn": "4911"
+      }
+    ],
+    "amount": 35000.0
+  },
+  {
+    "po_number": "PO-2026-0109",
+    "vendor_id": "V001",
+    "date": "2026-10-10",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Printed shrink sleeves 250 ml bottle",
+        "qty": 30000,
+        "unit_price": 2.4,
+        "amount": 72000.0,
+        "hsn": "3920"
+      }
+    ],
+    "amount": 72000.0
+  },
+  {
+    "po_number": "PO-2026-0110",
+    "vendor_id": "V002",
+    "date": "2026-10-12",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Industrial safety helmet with chin strap",
+        "qty": 300,
+        "unit_price": 450.0,
+        "amount": 135000.0,
+        "hsn": "6506"
+      }
+    ],
+    "amount": 135000.0
+  },
+  {
+    "po_number": "PO-2026-0111",
+    "vendor_id": "V003",
+    "date": "2026-10-15",
+    "status": "open",
+    "lines": [
+      {
+        "description": "FTL freight Chennai to Hyderabad (32 ft)",
+        "qty": 4,
+        "unit_price": 31000.0,
+        "amount": 124000.0,
+        "hsn": "9965"
+      }
+    ],
+    "amount": 124000.0
+  },
+  {
+    "po_number": "PO-2026-0112",
+    "vendor_id": "V004",
+    "date": "2026-10-01",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Managed backup service - monthly",
+        "qty": 12,
+        "unit_price": 15000.0,
+        "amount": 180000.0,
+        "hsn": "998315"
+      }
+    ],
+    "amount": 180000.0
+  },
+  {
+    "po_number": "PO-2026-0113",
+    "vendor_id": "V008",
+    "date": "2026-10-14",
+    "status": "open",
+    "lines": [
+      {
+        "description": "Jute sacks 50 kg",
+        "qty": 1000,
+        "unit_price": 38.0,
+        "amount": 38000.0,
+        "hsn": "6305"
+      },
+      {
+        "description": "Polypropylene twine roll",
+        "qty": 50,
+        "unit_price": 120.0,
+        "amount": 6000.0,
+        "hsn": "5607"
+      }
+    ],
+    "amount": 44000.0
+  }
+]

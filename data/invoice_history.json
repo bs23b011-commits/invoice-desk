@@ -1,0 +1,58 @@
+[
+  {
+    "vendor_id": "V001",
+    "invoice_number": "INV-0042",
+    "invoice_date": "2026-10-12",
+    "po_number": "PO-2026-0098",
+    "subtotal": 35000.0,
+    "tax": 6300.0,
+    "total": 41300.0,
+    "status": "APPROVE",
+    "lines": [
+      {
+        "description": "Printed product labels 100x50mm",
+        "qty": 20000,
+        "amount": 35000.0
+      }
+    ]
+  },
+  {
+    "vendor_id": "V002",
+    "invoice_number": "KIS/2026/0871",
+    "invoice_date": "2026-10-05",
+    "po_number": "PO-2026-0104",
+    "subtotal": 168000.0,
+    "tax": 30240.0,
+    "total": 198240.0,
+    "status": "APPROVE",
+    "lines": [
+      {
+        "description": "Nitrile safety gloves (pair)",
+        "qty": 1200,
+        "amount": 102000.0
+      },
+      {
+        "description": "Anti-fog safety goggles",
+        "qty": 300,
+        "amount": 66000.0
+      }
+    ]
+  },
+  {
+    "vendor_id": "V004",
+    "invoice_number": "NCS/INV/2026/117",
+    "invoice_date": "2026-07-02",
+    "po_number": "PO-2026-0103",
+    "subtotal": 120000.0,
+    "tax": 21600.0,
+    "total": 141600.0,
+    "status": "APPROVE",
+    "lines": [
+      {
+        "description": "Managed cloud hosting Q1 (Apr-Jun 2026)",
+        "qty": 1,
+        "amount": 120000.0
+      }
+    ]
+  }
+]
