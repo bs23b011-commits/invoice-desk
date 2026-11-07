@@ -108,7 +108,8 @@ def unreadable_card(run: dict) -> dict:
                 risk=dict(score=0, level=None, signals=[]),
                 owner=dict(name="AP reviewer", sub="Ask the sender for a readable copy", question=None, due=None,
                            escalate_to=None), thread=[], impact="Nothing can be posted or paid until a readable copy arrives.",
-                needs_phone_check=False, msme=False, stages_done=0, reply_examples=[], onboard=None)
+                needs_phone_check=False, msme=False, stages_done=0, reply_examples=[], onboard=None,
+                comments=len(store.comments(run["id"])))
 
 
 def card(run: dict) -> dict:
@@ -134,6 +135,7 @@ def card(run: dict) -> dict:
                                      signals=[s["label"] for s in risk.get("signals") or []]),
         owner=_owner(run), thread=thread, impact=_impact(res), needs_phone_check=bool(codes & SENSITIVE),
         msme=bool(inv.get("msme_deadline")), stages_done=sum(1 for s in run.get("stages") or [] if s.get("status")),
+        comments=len(store.comments(run["id"])),
         reply_examples=agent.simulate_examples(run) if res["decision"] == "REVIEW" else [],
         onboard=dict(name=inv.get("vendor_name") or "", gstin=inv.get("vendor_gstin") or "",
                      bank=inv.get("bank") or "") if "VENDOR_UNKNOWN" in codes else None)

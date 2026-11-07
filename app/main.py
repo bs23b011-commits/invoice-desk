@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from fastapi.responses import PlainTextResponse
 
-from . import agent, cockpit, config, erp, extract_llm, files, integrations, jeen, learning, master, pipeline, store
+from . import agent, cockpit, config, discussion, erp, extract_llm, files, integrations, jeen, learning, master, pipeline, store
 from .reader import read_pdf
 from .config import TOLERANCE_ABS, TOLERANCE_PCT
 from .matching import po_consumption
@@ -341,6 +341,25 @@ def onboard(rid: str, name: str = Form(...), gstin: str = Form(...), bank_name: 
         raise HTTPException(400, str(e))
     pipeline.reprocess(rid, {}, f"vendor {v['name']} onboarded by {who}")
     return J(dict(vendor=v, run_id=rid))
+
+
+# ================================================================== the invoice's discussion (@team, @Jeen)
+@app.get("/api/runs/{rid}/discussion")
+def get_discussion(rid: str):
+    try:
+        return J(discussion.timeline(rid))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/runs/{rid}/comments")
+def post_comment(rid: str, text: str = Form(...), author: str = Form("AP reviewer")):
+    """A person comments. @stores/@procurement/@vendor... get an email; @jeen answers in the thread."""
+    try:
+        new = discussion.post(rid, author, text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return J(dict(new=new, **discussion.timeline(rid)))
 
 
 @app.get("/api/waiting")

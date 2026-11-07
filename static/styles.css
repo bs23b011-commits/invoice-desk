@@ -638,3 +638,47 @@ kbd { font-family: var(--mono); font-size: .75rem; border: 1px solid var(--rule)
 .w-onboard { display: flex; flex-direction: column; gap: 12px; border-color: var(--carbon); }
 .w-onb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .w-onboard .w-verify { color: var(--ink); font-weight: 500; }
+
+/* ======================================================================== invoice discussion (@mentions, @Jeen) */
+.w-disc { display: flex; flex-direction: column; gap: 10px; }
+.disc-body { display: flex; flex-direction: column; gap: 10px; }
+.disc-pin { display: flex; gap: 10px; padding: 12px; border-radius: 12px; background: var(--carbon-soft); font-size: .88rem; line-height: 1.45; }
+.disc-av { flex-shrink: 0; width: 28px; height: 28px; border-radius: 9px; background: var(--surface-2); color: var(--ink); font-size: .7rem; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; }
+.disc-av.jeen { background: var(--carbon); color: var(--on-accent); }
+.disc-av svg { width: 16px; height: 16px; }
+.disc-h { font-size: .72rem; font-weight: 800; letter-spacing: .03em; color: var(--muted); margin-bottom: 3px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.disc-t { font-weight: 500; letter-spacing: 0; margin-left: auto; white-space: nowrap; font-size: .7rem; }
+.disc-list { display: flex; flex-direction: column; gap: 10px; max-height: 460px; overflow-y: auto; padding-right: 2px; }
+.disc-msg { display: flex; gap: 10px; font-size: .88rem; line-height: 1.45; min-width: 0; }
+.disc-msg > div { min-width: 0; flex: 1; }
+.disc-msg.person > div { background: var(--paper); border: 1px solid var(--rule); border-radius: 4px 12px 12px 12px; padding: 8px 11px; }
+.disc-msg.jeen > div { background: var(--carbon-soft); border-radius: 4px 12px 12px 12px; padding: 8px 11px; }
+.disc-msg.email { flex-direction: column; gap: 4px; border-left: 2px solid var(--rule); padding-left: 10px; }
+.disc-msg.email.in { border-left-color: var(--approve); }
+.disc-msg.email summary { cursor: pointer; font-size: .85rem; color: var(--ink); }
+.disc-body-txt { white-space: pre-line; overflow-wrap: anywhere; }
+.disc-msg.email .disc-body-txt { margin-top: 6px; color: var(--muted); font-size: .82rem; }
+.disc-u { font-size: .78rem; color: var(--muted); }
+.disc-ev { display: flex; gap: 8px; align-items: flex-start; font-size: .78rem; color: var(--muted); }
+.disc-ev svg { flex-shrink: 0; margin-top: 3px; }
+.disc-ev.decision { color: var(--approve); font-weight: 700; }
+.disc-ev.note.blocked { color: var(--review); }
+.disc-at { color: var(--carbon); font-weight: 700; }
+.disc-compose { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.disc-label { font-size: .72rem; font-weight: 800; color: var(--muted); letter-spacing: .05em; text-transform: uppercase; }
+.disc-input-wrap { position: relative; }
+.disc-compose textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: .9rem; color: var(--ink); background: var(--paper);
+  border: 1px solid var(--rule); border-radius: 10px; padding: 9px 11px; min-height: 60px; }
+.disc-compose textarea:focus { outline: 2px solid var(--carbon); outline-offset: 1px; }
+.disc-suggest { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); background: var(--surface-2); border: 1px solid var(--rule); border-radius: 10px;
+  box-shadow: var(--shadow); z-index: 20; display: flex; flex-direction: column; padding: 4px; }
+.disc-suggest button { text-align: left; background: none; border: 0; color: var(--ink); font: inherit; font-size: .84rem; padding: 7px 9px; border-radius: 7px; cursor: pointer;
+  display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.disc-suggest button:hover { background: var(--carbon-soft); }
+.disc-suggest button span { color: var(--muted); font-size: .74rem; width: 100%; }
+.disc-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.disc-chip { font: inherit; font-size: .78rem; font-weight: 700; color: var(--carbon); background: transparent; border: 1px solid var(--rule); border-radius: 999px;
+  padding: 5px 10px; min-height: 32px; cursor: pointer; }
+.disc-chip:hover { border-color: var(--carbon); }
+.disc-post { margin-left: auto; min-height: 40px; padding: 0 18px; }

@@ -65,6 +65,7 @@ def init(reset: bool = False):
             source TEXT, created TEXT)""")
         if reset:
             c.execute("DROP TABLE IF EXISTS events")
+            c.execute("DROP TABLE IF EXISTS comments")
             c.execute("DROP TABLE IF EXISTS grn")
             with connect(RUNTIME / "erp.db") as e:  # clear the ERP's tables instead of deleting its file
                 e.execute("DROP TABLE IF EXISTS docs")
@@ -82,6 +83,8 @@ def init(reset: bool = False):
                 c.execute("INSERT INTO grn(grn, po_number, description, qty, date, source) VALUES(?,?,?,?,?,?)",
                           (g["grn"], g["po_number"], g["description"], g["qty"], g["date"], "warehouse system"))
         seed_imports = c.execute("SELECT COUNT(*) FROM grn WHERE source='imported'").fetchone()[0] == 0
+        c.execute("""CREATE TABLE IF NOT EXISTS comments(
+            id TEXT PRIMARY KEY, run_id TEXT, at TEXT, author TEXT, kind TEXT, text TEXT, payload TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS events(
             id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, run_id TEXT, kind TEXT, text TEXT, data TEXT)""")
         n = c.execute("SELECT COUNT(*) FROM ledger").fetchone()[0]
@@ -174,6 +177,24 @@ def seen_hash(sha: str, exclude: str) -> dict | None:
         if p and p.get("sha256") == sha:
             return r
     return None
+
+
+def add_comment(run_id: str, author: str, kind: str, text: str, payload: dict | None = None) -> dict:
+    """One entry in an invoice's discussion: a person's comment, Jeen's answer, or a note about what happened."""
+    import uuid
+    from datetime import timezone
+    item = dict(id=uuid.uuid4().hex[:10], run_id=run_id, at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                author=author, kind=kind, text=text, payload=payload or {})
+    with _lock, _conn() as c:
+        c.execute("INSERT INTO comments(id, run_id, at, author, kind, text, payload) VALUES(?,?,?,?,?,?,?)",
+                  (item["id"], run_id, item["at"], author, kind, text, json.dumps(item["payload"], default=str)))
+    return item
+
+
+def comments(run_id: str) -> list[dict]:
+    with _lock, _conn() as c:
+        rows = c.execute("SELECT * FROM comments WHERE run_id=? ORDER BY at, rowid", (run_id,)).fetchall()
+    return [dict(dict(r), payload=json.loads(r["payload"] or "{}")) for r in rows]
 
 
 def add_event(run_id: str | None, kind: str, text: str, data: dict | None = None):

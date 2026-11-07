@@ -26,7 +26,7 @@ An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves
 | Single-digit errors above ₹1 caught by the arithmetic check | **100%** of 125 injected |
 | Good invoices still sent to a person | 5 of 10, all fax-quality scans where OCR was unsure of the invoice number. Conservative by design. |
 
-**206 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 15 for strange files and your own data (`tests/test_judge_kit.py`). All five n8n workflows tested live in n8n 1.123.
+**213 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 15 for strange files and your own data (`tests/test_judge_kit.py`). All five n8n workflows tested live in n8n 1.123.
 
 ## The 11 stages (live on screen for every invoice)
 
@@ -140,6 +140,15 @@ here — **not yet run against a live key**.
 
 All of this is fictional data: 8 vendors, 13 POs, goods receipts, invoice history and GSTR-2B. **Reset demo data** restores the starting state.
 
+## The invoice discussion (@mentions and @Jeen)
+
+Every invoice has one discussion, like comments on a shared document, in *Waiting for you*. It shows the whole story in order: when it arrived, the agent's emails and the replies, each re-check, the decision, and the team's comments, with Jeen's two-line summary pinned at the top.
+
+- **@Jeen** answers inside the thread, with source links ("@Jeen why is this on hold?", "@Jeen what do we owe Kaveri?"). It can explain and draft, never approve or pay.
+- **@Stores, @Procurement, @AP, @Controller, @Manager** send the comment to that team by email with the invoice's `[Ref …]` tag. Their reply comes back into the thread through n8n, the agent understands it ("received 100 more") and re-checks the invoice.
+- **@Vendor** writes to the vendor's address **on file**, except on a suspicious invoice (bank change, look-alike vendor), where it refuses and says to call the number in the vendor master.
+- Typing `@` suggests who can be mentioned; Ctrl+Enter posts.
+
 ## Testing it with your own invoices
 
 The demo's vendors and POs are fictional, so an invoice from your own supplier stops at "vendor not onboarded" (correctly: nobody unknown gets paid). Two ways to check it fully:
@@ -163,7 +172,7 @@ The demo's vendors and POs are fictional, so an invoice from your own supplier s
 # Python 3.11+, Tesseract (Windows: winget install UB-Mannheim.TesseractOCR | macOS: brew install tesseract tesseract-lang)
 pip install -r requirements.txt
 uvicorn app.main:app --reload             # http://localhost:8000
-STAGE_DELAY=0 python -m pytest -q         # 206 tests
+STAGE_DELAY=0 python -m pytest -q         # 213 tests
 python scripts/evaluate.py                # accuracy report -> docs/EVALUATION.md + dashboard
 python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVAL.md
 ```

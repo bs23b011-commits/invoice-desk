@@ -31,9 +31,9 @@ function stopWaiting() { clearInterval(W.poll); W.poll = null; }
 async function refreshWaiting(quiet) {
   let d;
   try { d = await api("/api/waiting"); } catch (e) { if (!quiet) toast(e.message); return; }
-  const before = JSON.stringify(W.items.map((x) => [x.id, x.recommendation, x.thread.length]));
+  const before = JSON.stringify(W.items.map((x) => [x.id, x.recommendation, x.thread.length, x.comments]));
   W.items = d.items;
-  const after = JSON.stringify(W.items.map((x) => [x.id, x.recommendation, x.thread.length]));
+  const after = JSON.stringify(W.items.map((x) => [x.id, x.recommendation, x.thread.length, x.comments]));
   if (quiet && before === after) return;  // nothing new: don't disturb a typed note
   if (!W.items.some((x) => x.id === W.sel) && !W.done[W.sel]) W.sel = W.items[0]?.id || null;
   $("#w-sum").textContent = shortInr(d.total);
@@ -143,6 +143,7 @@ function renderDetail() {
   $("#w-open").addEventListener("click", () => { state.open = new Set(["decision"]); state.lastStatus = {}; show("process"); openRun(x.id); });
   bindSim(x);
   if (x.onboard) bindOnboard(x);
+  if (typeof loadDiscussion === "function") loadDiscussion(x.id);
 }
 
 function renderUnreadable(x) {
@@ -159,6 +160,7 @@ function renderUnreadable(x) {
       <div class="muted small">It stays in Records, so nothing that arrived is ever lost.</div>
     </div>`;
   $("#w-side").innerHTML = sideHtml(x);
+  if (typeof loadDiscussion === "function") loadDiscussion(x.id);
   $("#w-detail").querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => decide(x, b.dataset.act)));
 }
 
@@ -211,11 +213,6 @@ const tidy = (b) => String(b || "").replace(/^\s*Dear[^\n]*\n+/, "").split(/\n\s
 
 function sideHtml(x) {
   const o = x.owner;
-  const bubbles = x.thread.map((m) => `<div class="w-msg ${m.direction}">
-      <div class="w-msg-h">${esc(m.direction === "out" ? m.who : m.who + " → Agent")} · ${m.at ? esc(fmtTime(m.at)) : ""}</div>
-      <div class="w-msg-b">${esc(tidy(m.body))}</div>
-      ${m.understood ? `<div class="w-msg-u">Understood as <b>${esc(m.understood.replace(/_/g, " "))}</b>${m.outcome ? `. ${esc(m.outcome)}` : ""}</div>` : ""}
-    </div>`).join("");
   const waitingFor = x.recommendation !== "APPROVE" && o.due
     ? `<div class="w-wait">${ICON.clock}<span>Waiting for ${esc(o.name)} · answer by ${esc(dueTxt(o.due))}, then it goes to ${esc(o.escalate_to)}</span></div>` : "";
   const sim = x.reply_examples.length ? `<div class="w-card w-sim"><div class="eyebrow">Simulate a reply</div>
@@ -226,8 +223,8 @@ function sideHtml(x) {
       <div class="w-owner"><div class="w-avatar">${esc(initials(o.name))}</div>
         <div><strong>${esc(o.name)}</strong><div class="muted small">${esc(o.sub)}${o.more ? ` (+${o.more} more)` : ""}</div></div></div>
       ${o.question ? `<p class="w-q">“${esc(o.question)}”</p>` : ""}</div>
-    <div class="w-card"><div class="eyebrow">Conversation</div>
-      <div class="w-thread">${bubbles || `<p class="muted small">${x.recommendation === "REJECT" ? "Nobody was contacted: suspected fraud is never answered." : "No messages needed."}</p>`}${waitingFor}</div></div>
+    <div class="w-card w-disc" id="w-disc" data-run="${esc(x.id)}"><div class="eyebrow">Discussion</div>
+      ${waitingFor}<div class="disc-body"><p class="muted small">Loading…</p></div></div>
     ${sim}`;
 }
 
