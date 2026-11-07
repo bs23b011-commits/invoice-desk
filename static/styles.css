@@ -682,3 +682,7 @@ kbd { font-family: var(--mono); font-size: .75rem; border: 1px solid var(--rule)
   padding: 5px 10px; min-height: 32px; cursor: pointer; }
 .disc-chip:hover { border-color: var(--carbon); }
 .disc-post { margin-left: auto; min-height: 40px; padding: 0 18px; }
+
+/* split PDFs */
+.w-batch { font-size: .72rem; font-weight: 700; color: var(--muted); border: 1px dashed var(--rule); border-radius: 8px; padding: 3px 8px; align-self: flex-start; }
+.w-batch.mixed { color: var(--review); border-color: var(--review); }

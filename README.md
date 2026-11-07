@@ -26,7 +26,7 @@ An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves
 | Single-digit errors above ₹1 caught by the arithmetic check | **100%** of 125 injected |
 | Good invoices still sent to a person | 5 of 10, all fax-quality scans where OCR was unsure of the invoice number. Conservative by design. |
 
-**213 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 15 for strange files and your own data (`tests/test_judge_kit.py`). All five n8n workflows tested live in n8n 1.123.
+**222 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 9 for several invoices in one PDF, 15 for strange files and your own data (`tests/test_judge_kit.py`). All five n8n workflows tested live in n8n 1.123.
 
 ## The 11 stages (live on screen for every invoice)
 
@@ -140,6 +140,21 @@ here — **not yet run against a live key**.
 
 All of this is fictional data: 8 vendors, 13 POs, goods receipts, invoice history and GSTR-2B. **Reset demo data** restores the starting state.
 
+## Several invoices in one PDF
+
+The first thing the agent does with a file is look at **every page on its own** (its text layer, or OCR if the page is a scan) and work out where each invoice starts: a new invoice number, or another vendor's GSTIN under a new heading. Then:
+
+| The PDF holds | What happens |
+|---|---|
+| One invoice (one or more pages) | Checked as usual |
+| Several invoices from **one vendor** | Split; each checked fully against **its own PO** and gets its own recommendation. Invoices on the same PO use up its balance in order |
+| Invoices from **different vendors** | Split and checked the same way, and each is **held for a person** even if every check passes: one vendor doesn't normally send another's invoice |
+| Scanned and digital pages mixed | Each page read its own way, then split as above |
+| The same invoice printed again ("duplicate for transporter") | Counted once; the copies are noted |
+| More than 10 pages | Held for a person, never half-read |
+
+The agent says what it found the moment the file arrives ("This PDF contains 3 invoices from Kaveri…"), each card in *Waiting for you* shows "2 of 3 in bills.pdf", and the note starts each invoice's discussion.
+
 ## The invoice discussion (@mentions and @Jeen)
 
 Every invoice has one discussion, like comments on a shared document, in *Waiting for you*. It shows the whole story in order: when it arrived, the agent's emails and the replies, each re-check, the decision, and the team's comments, with Jeen's two-line summary pinned at the top.
@@ -172,7 +187,7 @@ The demo's vendors and POs are fictional, so an invoice from your own supplier s
 # Python 3.11+, Tesseract (Windows: winget install UB-Mannheim.TesseractOCR | macOS: brew install tesseract tesseract-lang)
 pip install -r requirements.txt
 uvicorn app.main:app --reload             # http://localhost:8000
-STAGE_DELAY=0 python -m pytest -q         # 213 tests
+STAGE_DELAY=0 python -m pytest -q         # 222 tests
 python scripts/evaluate.py                # accuracy report -> docs/EVALUATION.md + dashboard
 python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVAL.md
 ```
@@ -222,7 +237,7 @@ python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVA
 - **Tax rates:** TDS rates and thresholds follow the Income-tax Act 2025 (s.393) as published for tax year 2026-27. **Verify against current law before relying on them.**
 - **IRN check is offline:** the IRN is recomputed offline. Live verification on the IRP needs a GSP connection.
 - **Simulated pieces:** GSTR-2B, the ERP ("Mock ERP") and the bank are local stand-ins with the same interfaces a real Zoho Books / Tally / ERPNext adapter or bank API would use.
-- **Pages:** digital PDFs are read up to 5 pages. On a scan only page 1 is OCR'd, and a multi-page scan goes to a person. Fax-quality Hindi scans usually go to a person; digital Hindi invoices are automatic.
+- **Pages:** an invoice is read up to 10 pages (digital). On a scanned invoice only its first page is OCR'd, so a multi-page scan goes to a person; a PDF over 10 pages also goes to a person, never half-read. Fax-quality Hindi scans usually go to a person; digital Hindi invoices are automatic.
 - **Currency:** INR only. An invoice in USD, EUR, GBP and so on is held for the finance controller.
 
 ## What I'd build next

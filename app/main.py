@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from fastapi.responses import PlainTextResponse
 
-from . import agent, cockpit, config, discussion, erp, extract_llm, files, integrations, jeen, learning, master, pipeline, store
+from . import agent, cockpit, config, discussion, splitter, erp, extract_llm, files, integrations, jeen, learning, master, pipeline, store
 from .reader import read_pdf
 from .config import TOLERANCE_ABS, TOLERANCE_PCT
 from .matching import po_consumption
@@ -75,12 +75,48 @@ async def create_run(sample: str | None = Form(None), file: UploadFile | None = 
         name, data, note = files.normalise(name, data)
     except files.Unreadable as e:
         raise HTTPException(400, str(e))
-    run = pipeline.new_run(name, sample_name)
-    store.file_path(run["id"], "pdf").write_bytes(data)
-    store.add_event(run["id"], "received", f"{name} {'picked from samples' if sample_name else 'uploaded'} in the app"
-                    + (f". {note}" if note else ""), dict(channel=run["channel"]["channel"], filename=name))
-    threading.Thread(target=pipeline.execute, args=(run, data), daemon=True).start()
-    return {"id": run["id"]}
+    how = "picked from samples" if sample_name else "uploaded"
+    runs, t = _start(name, data, sample_name, None, f"{name} {how} in the app" + (f". {note}" if note else ""))
+    out = {"id": runs[0]["id"]}
+    if runs[0].get("batch") and runs[0]["batch"].get("copies") and len(runs) == 1:
+        out.update(message=splitter.announce(runs[0]["batch"]))
+    if len(runs) > 1:
+        b = runs[0]["batch"]
+        out.update(split=[r["id"] for r in runs], mixed=b["mixed"], vendors=b["vendors"],
+                   message=f"This PDF contains {len(runs)} invoices"
+                           + (f" from {len(b['vendors'])} different vendors" if b["mixed"] else f" from {b['vendor']}")
+                           + ". Each one is checked separately; see Waiting for you.")
+    return out
+
+
+def _start(name: str, data: bytes, sample_name: str | None, channel: dict | None, event_text: str):
+    """Split the file into its invoices (usually just one), record each, and check them one after another,
+    so invoices against the same PO use up its balance in order."""
+    parts = splitter.plan(name, data)
+    runs = []
+    for part in parts:
+        run = pipeline.new_run(part["name"], sample_name if part["batch"] is None else None, channel)
+        store.file_path(run["id"], "pdf").write_bytes(part["pdf"])
+        if part["batch"]:
+            run["batch"] = part["batch"]
+        runs.append((run, part["pdf"]))
+    ids = [r["id"] for r, _ in runs]
+    for run, _ in runs:
+        if run.get("batch"):
+            run["batch"]["run_ids"] = ids
+            store.save_run(run)
+            store.add_comment(run["id"], "Agent", "note", splitter.announce(run["batch"]), dict(split=True))
+        store.add_event(run["id"], "received", event_text + (
+            f" (invoice {run['batch']['index']} of {run['batch']['count']} in this PDF)" if run.get("batch") else ""),
+            dict(channel or {}, channel=run["channel"]["channel"], filename=name, part=run["filename"]))  # dedupe key
+
+    def work():
+        for run, pdf in runs:
+            pipeline.execute(run, pdf)
+
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    return [r for r, _ in runs], t
 
 
 @app.get("/api/runs")
@@ -186,16 +222,14 @@ async def intake(file: UploadFile = File(...), channel: str = Form("email"), sen
             run = store.get_run(prev)
             return {"status": "already_received", "run_id": prev, **(integrations.summary(run) if run else {})}
     ch = dict(channel=channel, sender=sender, subject=subject, message_id=message_id, received_at=received_at)
-    run = pipeline.new_run(name, None, ch)
-    store.file_path(run["id"], "pdf").write_bytes(data)
-    store.add_event(run["id"], "received", f"{name} received by {channel}" + (f" from {sender}" if sender else "")
-                    + (f' ("{subject}")' if subject else ""), dict(ch, filename=name))
-    t = threading.Thread(target=pipeline.execute, args=(run, data), daemon=True)
-    t.start()
+    runs, t = _start(name, data, None, ch, f"{name} received by {channel}" + (f" from {sender}" if sender else "")
+                     + (f' ("{subject}")' if subject else ""))
+    run = runs[0]
+    extra = {"run_ids": [r["id"] for r in runs], "invoices_in_file": len(runs)} if len(runs) > 1 else {}
     if wait:
-        t.join(90)
-        return {"status": "processed", **integrations.summary(store.get_run(run["id"]))}
-    return {"status": "accepted", "run_id": run["id"], "url": f"{integrations.public_url()}/#run={run['id']}"}
+        t.join(90 * len(runs))
+        return {"status": "processed", **extra, **integrations.summary(store.get_run(run["id"]))}
+    return {"status": "accepted", "run_id": run["id"], **extra, "url": f"{integrations.public_url()}/#run={run['id']}"}
 
 
 @app.get("/api/runs/{rid}/summary")

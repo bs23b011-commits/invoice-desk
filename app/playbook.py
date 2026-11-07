@@ -44,6 +44,9 @@ PLAYBOOK = {
     "PAGES_UNREAD": dict(category="Pages not read", owner=AP, sla_h=24, escalate=CTRL,
                          q=lambda f, c: f"Only {_f(f, 'read')} of {_f(f, 'pages')} pages could be read. Do the lines "
                                         "and the total on the invoice match what is shown here?"),
+    "MIXED_PDF": dict(category="Several vendors in one PDF", owner=AP, sla_h=24, escalate=CTRL,
+                      q=lambda f, c: f"This invoice arrived in one PDF with invoices from other vendors "
+                                     f"({', '.join(f.get('vendors') or [])}). Is it genuine and meant for us?"),
     "FOREIGN_CURRENCY": dict(category="Foreign-currency invoice", owner=CTRL, sla_h=48, escalate=CTRL,
                              q=lambda f, c: f"This invoice is in {_f(f, 'currency')}. Pay it as a foreign remittance "
                                             "outside this desk, or reject it?"),

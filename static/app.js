@@ -23,9 +23,9 @@ async function api(path, opts) {
   }
   return r.json();
 }
-function toast(msg) {
+function toast(msg, ms) {
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
-  clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), 3200);
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), ms || Math.max(3200, msg.length * 55));
 }
 function fmtDate(iso) {
   if (!iso) return "—";
@@ -83,9 +83,12 @@ drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f)
 async function startRun({ sample, file }) {
   const fd = new FormData();
   if (file) fd.append("file", file); else fd.append("sample", sample);
+  if (file) toast("Looking at every page: how many invoices are in this file…", 15000);
   try {
-    const { id } = await api("/api/runs", { method: "POST", body: fd });
-    state.open = new Set(); state.lastStatus = {};
+    const j = await api("/api/runs", { method: "POST", body: fd });
+    const id = j.id;
+    if (j.message) toast(j.message, 9000);  // one PDF held several invoices (or copies): say so straight away
+    state.open = new Set(["intake"]); state.lastStatus = {};
     show("process");
     openRun(id);
     markActive(sample || null);

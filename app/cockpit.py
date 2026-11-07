@@ -99,6 +99,13 @@ def _impact(res: dict) -> str:
     return f"{fmt_inr(inv.get('net_payable') or inv.get('total'))} would be posted and scheduled for {_day(inv.get('due_date')) or 'its due date'}"
 
 
+def _batch(run: dict) -> dict | None:
+    b = run.get("batch")
+    if not b or b.get("count", 1) < 2:
+        return None
+    return dict(index=b["index"], count=b["count"], source=b["source"], mixed=b["mixed"], vendors=b["vendors"])
+
+
 def unreadable_card(run: dict) -> dict:
     ch = run.get("channel") or {}
     return dict(id=run["id"], recommendation="UNREADABLE", vendor=ch.get("sender") or run.get("filename"),
@@ -136,6 +143,7 @@ def card(run: dict) -> dict:
         owner=_owner(run), thread=thread, impact=_impact(res), needs_phone_check=bool(codes & SENSITIVE),
         msme=bool(inv.get("msme_deadline")), stages_done=sum(1 for s in run.get("stages") or [] if s.get("status")),
         comments=len(store.comments(run["id"])),
+        batch=_batch(run),
         reply_examples=agent.simulate_examples(run) if res["decision"] == "REVIEW" else [],
         onboard=dict(name=inv.get("vendor_name") or "", gstin=inv.get("vendor_gstin") or "",
                      bank=inv.get("bank") or "") if "VENDOR_UNKNOWN" in codes else None)

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from . import (agent, checks, compliance, decision, erp, extract_llm, extract_rules, integrations, learning, matching,
                risk, store)
-from . import config, files
+from . import config, files, reader
 from .config import MIN_FIELD_CONFIDENCE, REPAIR_MIN_CORROBORATION, STAGE_DELAY
 from .reader import inspect, read_pdf
 from .utils import fmt_inr, norm_invoice_no
@@ -102,11 +102,11 @@ def _consistent(inv: dict) -> bool:
 
 def execute(run: dict, pdf: bytes):
     t0 = time.time()
+    final = "done"
     try:
         _execute(run, pdf)
-        run["state"] = "done"
     except Exception as e:  # never leave a run hanging in the UI
-        run["state"] = "error"
+        final = "error"
         run["error"] = files.friendly_error(e)  # what a person should do; the technical detail stays in the trace
         run["error_detail"] = f"{type(e).__name__}: {e}"
         run["trace"] = traceback.format_exc()
@@ -122,6 +122,7 @@ def execute(run: dict, pdf: bytes):
         agent.act(run)  # before the run is visible as finished, so nobody sees a "done" run without its messages
     except Exception:
         traceback.print_exc()
+    run["state"] = final  # only now: anyone polling sees "done" together with the agent's messages
     store.save_run(run)
     LIVE.pop(run["id"], None)
     try:
@@ -166,6 +167,25 @@ def _execute(run: dict, pdf: bytes):
         st.add("pass" if info["has_text"] else "info",
                "Has a machine-readable text layer" if info["has_text"]
                else "No text layer - this is a scanned image, OCR needed")
+        b = run.get("batch")
+        if b:  # this invoice was split out of a PDF that held several
+            pages = b["pages"]
+            where = f"page {pages[0]}" if len(pages) == 1 else f"pages {pages[0]}-{pages[-1]}"
+            if b.get("copies"):
+                st.add("info", f"Page{'s' if len(b['copies']) > 1 else ''} {', '.join(map(str, b['copies']))}: copies of the same invoice in this PDF "
+                               "(same number and total), not counted again")
+            if b["count"] == 1:
+                pass
+            elif b["mixed"]:
+                st.add("warn", f"Split from {b['source']}: {b['count']} invoices from {len(b['vendors'])} different "
+                               f"vendors ({', '.join(b['vendors'])}) in one PDF. This is invoice {b['index']} ({where}). "
+                               "One vendor doesn't normally send another vendor's invoice, so a person should look at it "
+                               "even if every check passes", code="MIXED_PDF",
+                       facts=dict(source=b["source"], count=b["count"], vendors=b["vendors"]))
+            else:
+                st.add("info", f"Split from {b['source']}: {b['count']} invoices from {b['vendor']} in one PDF. "
+                               f"This is invoice {b['index']} of {b['count']} ({where}), checked on its own")
+    findings_by_stage["intake"] = [x for x in st.s["findings"] if x.get("code") == "MIXED_PDF"]
 
     # 2 ── read ------------------------------------------------------------------------------------
     with Stage(run, "read") as st:
@@ -185,10 +205,13 @@ def _execute(run: dict, pdf: bytes):
             if doc.pages_read >= doc.pages:
                 st.add("pass", f"Read all {doc.pages} pages")
             else:
-                st.add("warn", f"{doc.pages}-page invoice: only page{'s 1-' + str(doc.pages_read) if doc.pages_read > 1 else ' 1'} "
-                               f"could be read (scanned pages after the first are not read in this version). A person "
-                               f"should check the lines and total on the rest", code="PAGES_UNREAD",
-                       facts=dict(pages=doc.pages, read=doc.pages_read))
+                why = (f"only the first {doc.pages_read} pages are read" if doc.pages_read >= reader.MAX_PAGES
+                       else "scanned pages after the first are not read in this version")
+                st.add("warn", f"{doc.pages}-page document: only page{'s 1-' + str(doc.pages_read) if doc.pages_read > 1 else ' 1'} "
+                               f"could be read ({why}). A person should check the lines and total on the rest",
+                       code="PAGES_UNREAD", facts=dict(pages=doc.pages, read=doc.pages_read))
+        # these hold the invoice: a page nobody read could carry the real total
+        findings_by_stage["read"] = [x for x in st.s["findings"] if x.get("code") == "PAGES_UNREAD"]
 
     # 3 ── extract ---------------------------------------------------------------------------------
     with Stage(run, "extract") as st:

@@ -50,6 +50,7 @@ function renderList() {
       <span class="w-row"><strong>${esc(x.vendor || "Unknown vendor")}</strong><span class="mono">${shortInr(x.total)}</span></span>
       <span class="w-row"><span class="pill ${r.tone}">${r.list}${x.risk.score >= 25 ? ` · risk ${x.risk.score}` : ""}</span>
         <span class="muted small">${x.msme ? "MSME · " : ""}due ${esc(x.due || "—")}</span></span>
+      ${x.batch ? `<span class="w-batch ${x.batch.mixed ? "mixed" : ""}">${x.batch.index} of ${x.batch.count} in ${esc(x.batch.source)}${x.batch.mixed ? " · different vendors" : ""}</span>` : ""}
     </button>`;
   }).join("") || "";
   document.querySelectorAll(".w-item").forEach((b) => b.addEventListener("click", () => { W.sel = b.dataset.id; renderList(); renderDetail(); }));
@@ -106,7 +107,7 @@ function renderDetail() {
   el.innerHTML = `
     <div class="w-card w-head">
       <div class="w-head-l">
-        <div class="mono muted small">${esc(x.invoice_number || "no number")} · ${esc(x.channel)}</div>
+        <div class="mono muted small">${esc(x.invoice_number || "no number")} · ${esc(x.channel)}${x.batch ? ` · invoice ${x.batch.index} of ${x.batch.count} in ${esc(x.batch.source)}` : ""}</div>
         <h1>${esc(x.vendor || "Unknown vendor")}</h1>
         <div class="w-bars" aria-label="All checks run">${Array.from({ length: 11 }, () => `<span></span>`).join("")}
           <span class="muted small">11 stages run${x.duration ? ` · ${Number(x.duration).toFixed(1)} s` : ""}</span></div>

@@ -101,7 +101,7 @@ def group_lines(words: list[Word], tol: float = 3.5) -> list[Line]:
     return sorted(out, key=lambda l: l.top)
 
 
-MAX_PAGES = 5
+MAX_PAGES = 10
 
 
 def _render(pdf_bytes: bytes, scale: float):
