@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Invoice Desk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -17,21 +17,23 @@
 
 <header class="topbar">
   <div class="brand">
-    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l3 3v15H6z"/><path d="M9 12l2 2 4-4"/></svg></span>
     <div>
       <strong>Invoice Desk</strong>
-      <span class="brand-sub">Accounts payable, Meridian Foods</span>
+      <span class="brand-sub">Meridian Foods · accounts payable</span>
     </div>
   </div>
   <nav class="tabs" role="tablist">
-    <button role="tab" data-view="waiting" aria-selected="true">Waiting for you <span id="review-badge" class="badge" hidden></span></button>
-    <button role="tab" data-view="process" aria-selected="false">Process</button>
-    <button role="tab" data-view="dashboard" aria-selected="false">Dashboard</button>
+    <button role="tab" data-view="waiting" aria-selected="true">Invoices <span id="review-badge" class="badge" hidden></span></button>
+    <button role="tab" data-view="process" aria-selected="false">Upload &amp; check</button>
     <button role="tab" data-view="payments" aria-selected="false">Payments</button>
+    <button role="tab" data-view="dashboard" aria-selected="false">Reports</button>
     <button role="tab" data-view="records" aria-selected="false">Records</button>
   </nav>
   <div class="topbar-right">
     <span id="reader-mode" class="reader-mode"></span>
+    <button type="button" class="ask-jeen" id="ask-jeen" onclick="typeof jToggle === 'function' && jToggle(true)">
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4"/><circle cx="9.5" cy="13.5" r="1"/><circle cx="14.5" cy="13.5" r="1"/></svg>Ask Jeen</button>
     <button id="theme" class="btn ghost small icon-btn" aria-label="Switch light or dark" title="Switch light or dark">
       <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
     </button>
@@ -42,27 +44,35 @@
 <main>
   <!-- WAITING FOR YOU: the agent recommends, a person decides ---------------------------->
   <section id="view-waiting" class="view waiting">
-    <aside class="w-list" aria-label="Waiting for you">
-      <div class="w-total">
-        <div class="eyebrow">Waiting for you</div>
-        <div class="w-sum mono" id="w-sum">—</div>
-        <div class="muted small" id="w-count"></div>
+    <div id="w-listview" class="c-wrap">
+      <div class="c-titlebar">
+        <div><h1 class="c-title">Invoices</h1><p class="muted" id="w-count"></p></div>
+        <button type="button" class="c-btn primary" onclick="show('process')">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Upload invoice</button>
       </div>
-      <div id="w-items" class="w-items"></div>
-      <p class="keys muted small">Keys: <kbd>J</kbd>/<kbd>K</kbd> next/previous · <kbd>A</kbd> approve · <kbd>R</kbd> reject</p>
-    </aside>
-    <article class="w-detail" id="w-detail" aria-live="polite"></article>
-    <aside class="w-side" id="w-side" aria-label="Who can resolve it and the conversation"></aside>
+      <div class="c-filters" id="w-filters" aria-label="Show"></div>
+      <div id="w-featured" aria-live="polite"></div>
+      <div id="w-items"></div>
+    </div>
+    <div id="w-detailview" class="c-wrap" hidden>
+      <button type="button" class="c-back" id="w-back">← All invoices</button>
+      <div class="c-detail">
+        <div class="c-main" id="w-detail" aria-live="polite"></div>
+        <aside class="c-side" id="w-side" aria-label="Who can sort it out and the discussion"></aside>
+      </div>
+    </div>
   </section>
 
   <!-- PROCESS ------------------------------------------------------------------------------>
   <section id="view-process" class="view process" hidden>
+    <header class="c-pagehead"><h1 class="c-title">Upload &amp; check</h1><p class="muted">Drop a PDF or a phone photo, or try a sample. One invoice or many in one file: the agent sorts them out and shows every check as it runs.</p></header>
     <aside class="inbox" aria-label="Inbox">
-      <h2>Inbox</h2>
+      <h2>Samples to try</h2>
       <label class="drop" id="drop">
         <input type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp" hidden>
-        <span class="drop-title">Drop an invoice PDF or photo</span>
-        <span class="drop-sub">or choose a file</span>
+        <span class="drop-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg></span>
+        <span class="drop-title">Drop invoices here</span>
+        <span class="drop-sub">PDF or photo · or <u>choose a file</u></span>
       </label>
       <div id="samples"></div>
     </aside>
@@ -96,6 +106,7 @@
 
   <!-- DASHBOARD ---------------------------------------------------------------------------->
   <section id="view-dashboard" class="view dashboard" hidden>
+    <header class="c-pagehead"><h1 class="c-title">Reports</h1><p class="muted">What came in, what the agent advised, how much of each PO is used, and how accurate it is on invoices with known answers.</p></header>
     <div class="dash-summary" id="dash-summary"></div>
     <div class="dash-grid">
       <section class="panel" id="queue-panel">
@@ -137,6 +148,7 @@
 
   <!-- PAYMENTS -------------------------------------------------------------------------------->
   <section id="view-payments" class="view payments" hidden>
+    <header class="c-pagehead"><h1 class="c-title">Payments</h1><p class="muted">Approved invoices waiting to be paid. MSME vendors first; money always goes to the bank account on file, never the one printed on an invoice.</p></header>
     <div class="dash-summary" id="pay-summary"></div>
     <section class="panel">
       <div class="panel-head"><h2>Approved and posted, waiting to be paid</h2>
@@ -152,6 +164,7 @@
 
   <!-- RECORDS ------------------------------------------------------------------------------>
   <section id="view-records" class="view records" hidden>
+    <header class="c-pagehead"><h1 class="c-title">Records</h1><p class="muted">The vendors, purchase orders and goods receipts the agent checks against. Bring your own here.</p></header>
     <p class="muted records-intro" id="rules-intro"></p>
     <section class="panel"><h2>Connections</h2>
       <p class="muted panel-note">n8n moves the messages; every decision is made here. The app works fully without them.</p>

@@ -2,7 +2,7 @@
    Uses helpers from app.js: $, esc, inr, api, toast, show, openRun, refreshBadge, fmtTime. */
 "use strict";
 
-const W = { items: [], sel: null, poll: null, done: {}, busy: false };
+const W = { items: [], sel: null, poll: null, done: {}, busy: false, mode: "list", filter: "all", approver: "AP manager" };
 const REC = {
   APPROVE: { word: "Approve", tone: "approve", list: "Recommend approve" },
   REVIEW: { word: "Hold", tone: "review", list: "Recommend hold" },
@@ -28,117 +28,206 @@ async function loadWaiting() {
 }
 function stopWaiting() { clearInterval(W.poll); W.poll = null; }
 
+/* ---------------------------------------------------------------- plain-language status for each invoice */
+const firstSentence = (t) => String(t || "").split(/(?<=[.!?])\s/)[0];
+const vname = (x) => String(x.vendor || "Unknown vendor").replace(/\s*\(imitating[^)]*\)/i, " (look-alike)");
+const shortName = (n) => String(n || "").replace(/\s*\(.*?\)/, "").replace(/ \/ receiving$/, "");
+function waitingOn(x) {
+  return x.recommendation === "REVIEW" && !x.needs_phone_check && x.owner && x.owner.name !== W.approver
+    && x.thread.some((m) => m.direction === "out");
+}
+function cat(x) {
+  if (x.recommendation === "REJECT" || x.recommendation === "UNREADABLE") return "stop";
+  return waitingOn(x) ? "waiting" : "you";
+}
+function statusLine(x) {
+  if (x.recommendation === "UNREADABLE") return "Can't read this file. Ask the sender for a readable copy";
+  if (x.recommendation === "REJECT") return "Don't pay. " + firstSentence(x.note);
+  if (x.recommendation === "APPROVE") return `Ready: every check passed${x.due ? ` · pays ${x.due}` : ""}`;
+  if (x.needs_phone_check) return "New bank account on the invoice. Call them on the number on file first";
+  if (waitingOn(x)) return `Waiting for ${shortName(x.owner.name)}: ${firstSentence(x.owner.question || x.note)}`;
+  return firstSentence(x.note);
+}
+const PILL = { you: ["Needs you", "review"], waiting: ["Waiting", "info"], stop: ["Don't pay", "reject"] };
+function pill(x) {
+  if (x.recommendation === "APPROVE") return ["Ready", "approve"];
+  if (x.recommendation === "UNREADABLE") return ["Can't read", "reject"];
+  return PILL[cat(x)];
+}
+function steps(x) {
+  const ok = "approve", warn = "review", bad = "reject", now = "now", todo = "todo";
+  const got = { label: "Received", tone: ok, sub: `${x.channel}${x.created ? ", " + dTimeShort(x.created) : ""}` };
+  if (x.recommendation === "UNREADABLE") {
+    return [got, { label: "Can't read", tone: bad, sub: "file damaged or locked" }, { label: "You decide", tone: now },
+            { label: "Checked", tone: todo }, { label: "Paid", tone: todo }];
+  }
+  const checked = { label: "Checked", tone: ok, sub: `${x.stages_done || 11} checks` };
+  let third;
+  if (x.recommendation === "APPROVE") third = { label: x.thread.some((m) => m.direction === "in") ? "Questions answered" : "All checks passed", tone: ok };
+  else if (x.recommendation === "REJECT") third = { label: "Problem found", tone: bad };
+  else if (waitingOn(x)) third = { label: `Waiting for ${shortName(x.owner.name)}`, tone: warn, sub: x.owner.due ? "reply by " + dueTxt(x.owner.due) : "" };
+  else third = { label: "Needs a look", tone: warn };
+  return [got, checked, third, { label: "You decide", tone: waitingOn(x) ? todo : now }, { label: "Paid", tone: todo, sub: x.due || "" }];
+}
+const dTimeShort = (iso) => { try { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" }); } catch (_) { return ""; } };
+function tracker(x) {
+  return `<ol class="c-track" aria-label="Where this invoice is">${steps(x).map((s) =>
+    `<li class="t-${s.tone}"><span class="c-bar"></span><span class="c-step">${esc(s.label)}</span>${s.sub ? `<span class="c-sub">${esc(s.sub)}</span>` : ""}</li>`).join("")}</ol>`;
+}
+const AGENT_SAYS = { APPROVE: ["approve.", "approve"], REVIEW: ["wait.", "review"], REJECT: ["don't pay.", "reject"], UNREADABLE: ["get a readable copy.", "reject"] };
+function agentSays(x) {
+  const [w, tone] = AGENT_SAYS[x.recommendation];
+  return `<div class="c-says t-${tone}"><b>Agent says: ${w}</b> ${esc(x.note)}</div>`;
+}
+
+/* ---------------------------------------------------------------- data + the list */
 async function refreshWaiting(quiet) {
   let d;
   try { d = await api("/api/waiting"); } catch (e) { if (!quiet) toast(e.message); return; }
-  const before = JSON.stringify(W.items.map((x) => [x.id, x.recommendation, x.thread.length, x.comments]));
+  const sig = (xs) => JSON.stringify(xs.map((x) => [x.id, x.recommendation, x.thread.length, x.comments]));
+  const before = sig(W.items);
   W.items = d.items;
-  const after = JSON.stringify(W.items.map((x) => [x.id, x.recommendation, x.thread.length, x.comments]));
-  if (quiet && before === after) return;  // nothing new: don't disturb a typed note
-  if (!W.items.some((x) => x.id === W.sel) && !W.done[W.sel]) W.sel = W.items[0]?.id || null;
-  $("#w-sum").textContent = shortInr(d.total);
-  $("#w-count").textContent = d.items.length ? `${d.items.length} invoice${d.items.length > 1 ? "s" : ""} need your decision` : "Nothing needs you right now";
+  W.approver = d.approver;
+  if (quiet && before === sig(W.items)) return;  // nothing new: don't disturb a typed note
+  if (W.mode === "detail" && !W.items.some((x) => x.id === W.sel) && !W.done[W.sel]) W.mode = "list";
   refreshBadge(d.items.length);
   renderList();
-  renderDetail();
+  if (W.mode === "detail") renderDetail();
 }
 
 function renderList() {
-  $("#w-items").innerHTML = W.items.map((x) => {
-    const r = REC[x.recommendation];
-    return `<button type="button" class="w-item ${x.id === W.sel ? "sel" : ""}" data-id="${esc(x.id)}" aria-pressed="${x.id === W.sel}">
-      <span class="w-row"><strong>${esc(x.vendor || "Unknown vendor")}</strong><span class="mono">${shortInr(x.total)}</span></span>
-      <span class="w-row"><span class="pill ${r.tone}">${r.list}${x.risk.score >= 25 ? ` · risk ${x.risk.score}` : ""}</span>
-        <span class="muted small">${x.msme ? "MSME · " : ""}due ${esc(x.due || "—")}</span></span>
-      ${x.batch ? `<span class="w-batch ${x.batch.mixed ? "mixed" : ""}">${x.batch.index} of ${x.batch.count} in ${esc(x.batch.source)}${x.batch.mixed ? " · different vendors" : ""}</span>` : ""}
-    </button>`;
-  }).join("") || "";
-  document.querySelectorAll(".w-item").forEach((b) => b.addEventListener("click", () => { W.sel = b.dataset.id; renderList(); renderDetail(); }));
+  const counts = { all: W.items.length, you: 0, waiting: 0, stop: 0 };
+  W.items.forEach((x) => counts[cat(x)]++);
+  const f = W.filter || "all";
+  const rank = (x) => (x.recommendation === "APPROVE" ? 0 : cat(x) === "you" ? 1 : cat(x) === "stop" ? 2 : 3);
+  const items = W.items.filter((x) => f === "all" || cat(x) === f).sort((a, b) => rank(a) - rank(b));
+  const total = W.items.reduce((a, i) => a + (i.total || 0), 0);
+  $("#w-count").textContent = W.items.length
+    ? `${W.items.length} invoice${W.items.length > 1 ? "s" : ""} waiting for a decision · ${shortInr(total)}`
+    : "Nothing needs you right now";
+  $("#w-filters").innerHTML = [["all", "All"], ["you", "Need you"], ["waiting", "Waiting on others"], ["stop", "Don't pay"]]
+    .map(([k, l]) => `<button type="button" class="c-chip ${f === k ? "on" : ""}" data-f="${k}" aria-pressed="${f === k}">${l} · ${counts[k]}</button>`).join("");
+  document.querySelectorAll("#w-filters .c-chip").forEach((b) => b.addEventListener("click", () => { W.filter = b.dataset.f; renderList(); }));
+  const [top, ...rest] = items;
+  $("#w-featured").innerHTML = top ? featured(top) : (W.items.length ? `<p class="muted c-none">Nothing in this group.</p>` : emptyState());
+  $("#w-items").innerHTML = rest.length ? `<div class="c-rows">${rest.map(row).join("")}</div>` : "";
+  document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDetail(b.dataset.open)));
+  document.querySelectorAll("[data-quick]").forEach((b) => b.addEventListener("click", () => {
+    const x = W.items.find((i) => i.id === b.dataset.quick);
+    openDetail(x.id);
+    decide(x, "approve");
+  }));
+  $("#w-go-process")?.addEventListener("click", () => show("process"));
 }
 
-function gauge(score) {
-  const color = score >= 70 ? "var(--reject)" : score >= 25 ? "var(--review)" : "var(--approve)";
-  const dash = (Math.min(100, Math.max(0, score)) / 100 * 188.5).toFixed(1);
-  return `<svg role="img" aria-label="Fraud risk ${score} out of 100" width="170" height="96" viewBox="0 0 160 90">
-    <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="var(--rule)" stroke-width="12" stroke-linecap="round"/>
-    <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${dash} 400"/>
-    <text x="80" y="76" text-anchor="middle" fill="currentColor" font-family="JetBrains Mono, monospace" font-size="26" font-weight="700">${score}</text></svg>`;
+function featured(x) {
+  const quick = x.recommendation === "APPROVE" && !x.needs_phone_check;
+  return `<section class="c-card c-feature">
+    <div class="c-row-top">
+      <div><span class="c-vendor">${esc(vname(x))}</span> <span class="muted">· ${esc(x.invoice_number || "no number")}</span>
+        ${x.batch ? `<span class="c-batch ${x.batch.mixed ? "mixed" : ""}">${x.batch.index} of ${x.batch.count} in ${esc(x.batch.source)}</span>` : ""}</div>
+      <span class="c-amount">${shortInr(x.total)}</span>
+    </div>
+    ${tracker(x)}
+    ${agentSays(x)}
+    <div class="c-btns">
+      ${quick ? `<button type="button" class="c-btn approve" data-quick="${esc(x.id)}">Approve payment</button>` : ""}
+      <button type="button" class="c-btn ${quick ? "ghost" : "primary"}" data-open="${esc(x.id)}">${quick ? "Details" : "Open and decide"}</button>
+    </div>
+  </section>`;
 }
 
+function row(x) {
+  const [label, tone] = pill(x);
+  return `<button type="button" class="c-listrow" data-open="${esc(x.id)}">
+    <span class="c-who"><b>${esc(vname(x))}</b><span class="muted">${shortInr(x.total)}${x.batch ? ` · ${x.batch.index} of ${x.batch.count} in ${esc(x.batch.source)}` : ""}</span></span>
+    <span class="c-what"><span class="c-dot t-${tone}" aria-hidden="true"></span>${esc(statusLine(x))}</span>
+    <span class="c-pill t-${tone}">${label}</span>
+  </button>`;
+}
+
+function emptyState() {
+  return `<div class="c-card c-empty"><div class="w-empty-mark">${ICON.ok}</div><h2>Nothing is waiting for you</h2>
+    <p class="muted">When the agent finishes an invoice, it lands here with its advice. Nothing is posted or paid until you approve.</p>
+    <button class="c-btn primary" type="button" id="w-go-process">Upload an invoice</button></div>`;
+}
+
+function openDetail(id) {
+  W.sel = id; W.mode = "detail";
+  $("#w-listview").hidden = true; $("#w-detailview").hidden = false;
+  renderDetail();
+  window.scrollTo({ top: 0 });
+}
+function backToList() {
+  if (W.done[W.sel]) delete W.done[W.sel];
+  W.mode = "list";
+  $("#w-detailview").hidden = true; $("#w-listview").hidden = false;
+  renderList();
+}
+
+/* ---------------------------------------------------------------- one invoice */
 function matchBlock(m) {
   if (!m.lines.length) {
-    return `<div class="w-card"><div class="eyebrow">3-way match</div>
-      <p class="w-nomatch">${m.po_number ? "Purchase order found but no lines could be paired." : "No purchase order on this invoice, so nothing to match yet."}</p></div>`;
+    return `<section class="c-card"><h2 class="c-h">Did we get what we paid for?</h2>
+      <p class="muted">${m.po_number ? "The purchase order was found, but its lines couldn't be paired with the invoice." : "There's no purchase order on this invoice, so there's nothing to compare yet."}</p></section>`;
   }
-  const cell = (label, val, sub, tone) => `<div class="w-cell ${tone ? "is-" + tone : ""}"><div class="eyebrow">${label}</div>
-    <div class="mono w-big">${esc(val ?? "—")}</div><div class="muted small">${esc(sub || "")}</div></div>`;
+  const box = (label, val, sub, bad, good) => `<div class="c-box ${bad ? "bad" : ""}"><div class="c-box-l">${label}</div>
+    <div class="c-box-n">${esc(val ?? "—")}</div><div class="c-box-s ${good ? "good" : ""}">${esc(sub || "")}</div></div>`;
   const rows = m.lines.slice(0, 3).map((l) => {
     const short = l.received != null && l.billed != null && l.received < l.billed;
-    return `<div class="w-line">${l.item ? `<div class="muted small w-item-name">${esc(l.item)}</div>` : ""}
-      <div class="w-cells">
-        ${cell("Ordered", l.ordered, "on the PO", "")}
-        ${cell("Received", l.service ? "Service" : l.received, l.service ? "no receipt needed" : short ? `${l.billed - l.received} missing` : "in the warehouse", short ? "bad" : "")}
-        ${cell("Billed", l.billed, l.price_ok ? "price as PO" : "price above PO", l.price_ok && (!l.ordered || l.billed <= l.ordered) ? "" : "bad")}
-      </div></div>`;
+    const over = l.ordered != null && l.billed > l.ordered;
+    return `${m.lines.length > 1 && l.item ? `<div class="c-item">${esc(l.item)}</div>` : ""}<div class="c-boxes">
+      ${box("We ordered", l.ordered, "on the PO", false)}
+      ${box("We received", l.service ? "Service" : l.received, l.service ? "no delivery to count" : short ? `${l.billed - l.received} still missing` : "in the warehouse", short)}
+      ${box("They billed", l.billed, !l.price_ok ? "price above the PO" : over ? "more than ordered" : "price matches the PO", !l.price_ok || over, l.price_ok && !over)}
+    </div>`;
   }).join("");
-  return `<div class="w-card"><div class="eyebrow">3-way match · ${esc(m.po_number || "")}${m.how && m.how !== "quoted on invoice" ? ` (${esc(m.how)})` : ""}</div>${rows}
-    ${m.lines.length > 3 ? `<p class="muted small">+ ${m.lines.length - 3} more lines</p>` : ""}</div>`;
+  return `<section class="c-card"><h2 class="c-h">Did we get what we paid for?${m.po_number ? ` <span class="muted c-hint">${esc(m.po_number)}</span>` : ""}</h2>${rows}
+    ${m.lines.length > 3 ? `<p class="muted small">+ ${m.lines.length - 3} more lines</p>` : ""}</section>`;
+}
+
+function checkChips(x) {
+  return `<div class="c-checks">${x.checks.map((c) => {
+    const t = c.ok ? "approve" : c.status === "fail" ? "reject" : "review";
+    return `<span class="c-check t-${t}" title="${esc(c.detail)}">${c.ok ? ICON.ok : t === "reject" ? ICON.bad : ICON.warn} ${esc(c.label)}</span>`;
+  }).join("")}</div>
+  ${x.risk.signals.length ? `<div class="c-signals"><b>Fraud signals:</b> ${x.risk.signals.map(esc).join(" · ")}</div>` : ""}`;
 }
 
 function renderDetail() {
   const el = $("#w-detail"), side = $("#w-side");
   const done = W.done[W.sel];
-  if (done) return renderDone(done);
+  if (done) { side.innerHTML = ""; return renderDone(done); }
   const x = W.items.find((i) => i.id === W.sel);
-  if (!x) {
-    el.innerHTML = `<div class="w-empty"><div class="w-empty-mark">${ICON.ok}</div><h1>Nothing is waiting for you</h1>
-      <p class="muted">When the agent finishes an invoice, it lands here with its recommendation. Nothing is posted or paid until you approve.</p>
-      <button class="btn" type="button" id="w-go-process">Process an invoice</button></div>`;
-    side.innerHTML = "";
-    $("#w-go-process").addEventListener("click", () => show("process"));
-    return;
-  }
+  if (!x) return backToList();
   if (x.recommendation === "UNREADABLE") return renderUnreadable(x);
-  const r = REC[x.recommendation];
-  const checks = x.checks.map((c) => {
-    const t = c.ok ? "ok" : c.status === "fail" ? "bad" : "warn";
-    return `<div class="w-check is-${t}"><span class="w-dot">${ICON[t]}</span><span><strong>${esc(c.label)}</strong><span class="muted small">${esc(c.detail)}</span></span></div>`;
-  }).join("");
+  const i = W.items.indexOf(x);
   el.innerHTML = `
-    <div class="w-card w-head">
-      <div class="w-head-l">
-        <div class="mono muted small">${esc(x.invoice_number || "no number")} · ${esc(x.channel)}${x.batch ? ` · invoice ${x.batch.index} of ${x.batch.count} in ${esc(x.batch.source)}` : ""}</div>
-        <h1>${esc(x.vendor || "Unknown vendor")}</h1>
-        <div class="w-bars" aria-label="All checks run">${Array.from({ length: 11 }, () => `<span></span>`).join("")}
-          <span class="muted small">11 stages run${x.duration ? ` · ${Number(x.duration).toFixed(1)} s` : ""}</span></div>
+    <section class="c-card c-feature">
+      <div class="c-row-top">
+        <div><div class="c-vendor big">${esc(vname(x))}</div>
+          <div class="muted">${esc(x.invoice_number || "no number")}${x.match.po_number ? " · " + esc(x.match.po_number) : ""} · arrived by ${esc(x.channel)}${x.created ? ", " + dTimeShort(x.created) : ""}${x.batch ? ` · invoice ${x.batch.index} of ${x.batch.count} in ${esc(x.batch.source)}` : ""}</div></div>
+        <div class="c-amount-wrap"><div class="c-amount big">${shortInr(x.total)}</div><div class="muted small">due ${esc(x.due || "—")}${x.msme ? " · MSME" : ""}</div></div>
       </div>
-      <div class="w-head-r"><div class="mono w-amount">${shortInr(x.total)}</div><div class="muted small">due ${esc(x.due || "—")}${x.msme ? " · MSME" : ""}</div></div>
-    </div>
-    <div class="w-agent ${r.tone}">
-      <div class="w-agent-icon">${ICON.agent}</div>
-      <div><div class="eyebrow tone">Agent recommends · ${r.word}</div><p>${esc(x.note)}</p></div>
-    </div>
-    <div class="w-grid2">
-      ${matchBlock(x.match)}
-      <div class="w-card w-risk"><div class="eyebrow">Fraud risk</div>${gauge(x.risk.score)}
-        <div class="small w-risk-word ${x.risk.score >= 70 ? "reject" : x.risk.score >= 25 ? "review" : "approve"}">${x.risk.score >= 70 ? "Block payment" : x.risk.score >= 25 ? "Phone check needed" : "Low"}</div>
-        ${x.risk.signals.length ? `<ul class="w-signals">${x.risk.signals.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}</div>
-    </div>
-    <div class="w-card"><div class="eyebrow">Why</div><div class="w-checks">${checks}</div></div>
-    <div class="w-card w-act">
-      <div class="small"><span class="muted">If you approve →</span> ${esc(x.impact)}</div>
+      ${tracker(x)}
+      ${agentSays(x)}
+    </section>
+    ${matchBlock(x.match)}
+    <section class="c-card"><h2 class="c-h">The checks</h2>${checkChips(x)}</section>
+    ${x.onboard ? onboardHtml(x.onboard) : ""}
+    <section class="c-card c-decide">
+      <div class="c-impact"><span class="muted">If you approve:</span> ${esc(x.impact)}</div>
       <label class="w-note">${x.recommendation === "REJECT" ? "Why approve anyway? (required)" : "Your note (optional, saved in the audit trail)"}
         <input type="text" id="w-note" placeholder="${x.recommendation === "REJECT" ? "At least 10 characters" : "e.g. checked with Ravi in Stores"}"></label>
       ${x.needs_phone_check ? `<label class="w-verify"><input type="checkbox" id="w-verified"> I called the vendor on the number already in the vendor master (not the one on the invoice)</label>` : ""}
-      <label class="w-note w-who">Deciding as <input type="text" id="w-who" value="${esc(localGet("who") || "AP manager")}" aria-label="Your name"></label>
-      <div class="w-btns">
-        <button type="button" class="w-btn approve" data-act="approve">${x.recommendation === "APPROVE" ? "Approve &amp; schedule payment" : "Approve anyway"}</button>
-        <button type="button" class="w-btn reject" data-act="reject">${x.recommendation === "REJECT" ? "Confirm reject" : "Reject"}</button>
-        <button type="button" class="w-btn ghost" id="w-open">Open full details</button>
+      <div class="c-btns">
+        <button type="button" class="c-btn ${x.recommendation === "APPROVE" ? "approve" : "ghost-approve"} w-btn" data-act="approve">${x.recommendation === "APPROVE" ? "Approve payment" : "Approve anyway"}</button>
+        <button type="button" class="c-btn ghost-reject w-btn" data-act="reject">${x.recommendation === "REJECT" ? "Confirm: don't pay" : "Reject"}</button>
+        <button type="button" class="c-btn ghost" id="w-open">See every check</button>
+        <label class="w-who">Deciding as <input type="text" id="w-who" value="${esc(localGet("who") || "AP manager")}" aria-label="Your name"></label>
       </div>
-      <div class="muted small">Nothing is posted or paid until you decide.</div>
-    </div>
-    ${x.onboard ? onboardHtml(x.onboard) : ""}`;
+      <div class="muted small">Nothing is posted or paid until you decide. Keys: <kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>J</kbd>/<kbd>K</kbd> next/previous (${i + 1} of ${W.items.length})</div>
+    </section>`;
   side.innerHTML = sideHtml(x);
   el.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => decide(x, b.dataset.act)));
   $("#w-open").addEventListener("click", () => { state.open = new Set(["decision"]); state.lastStatus = {}; show("process"); openRun(x.id); });
@@ -149,17 +238,19 @@ function renderDetail() {
 
 function renderUnreadable(x) {
   $("#w-detail").innerHTML = `
-    <div class="w-card w-head"><div class="w-head-l"><div class="mono muted small">${esc(x.invoice_number || "")} · ${esc(x.channel)}</div>
-      <h1>${esc(x.vendor || "Unknown sender")}</h1></div></div>
-    <div class="w-agent reject"><div class="w-agent-icon">${ICON.alert}</div>
-      <div><div class="eyebrow tone">Can't read this file</div><p>${esc(x.note)}</p></div></div>
-    <div class="w-card w-act">
-      <div class="small">${esc(x.impact)}</div>
+    <section class="c-card c-feature">
+      <div class="c-row-top"><div><div class="c-vendor big">${esc(x.vendor || "Unknown sender")}</div>
+        <div class="muted">${esc(x.invoice_number || "")} · arrived by ${esc(x.channel)}</div></div></div>
+      ${tracker(x)}
+      ${agentSays(x)}
+    </section>
+    <section class="c-card c-decide">
+      <div class="c-impact">${esc(x.impact)}</div>
       <label class="w-note">Note (optional)<input type="text" id="w-note" placeholder="e.g. asked the vendor for a new copy"></label>
-      <label class="w-note w-who">Deciding as <input type="text" id="w-who" value="${esc(localGet("who") || "AP manager")}" aria-label="Your name"></label>
-      <div class="w-btns"><button type="button" class="w-btn reject" data-act="reject">Dismiss: asked for a new copy</button></div>
+      <div class="c-btns"><button type="button" class="c-btn ghost-reject w-btn" data-act="reject">Dismiss: asked for a new copy</button>
+        <label class="w-who">Deciding as <input type="text" id="w-who" value="${esc(localGet("who") || "AP manager")}" aria-label="Your name"></label></div>
       <div class="muted small">It stays in Records, so nothing that arrived is ever lost.</div>
-    </div>`;
+    </section>`;
   $("#w-side").innerHTML = sideHtml(x);
   if (typeof loadDiscussion === "function") loadDiscussion(x.id);
   $("#w-detail").querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => decide(x, b.dataset.act)));
@@ -167,7 +258,7 @@ function renderUnreadable(x) {
 
 function onboardHtml(o) {
   const bankName = (o.bank || "").split(" ****")[0];
-  return `<div class="w-card w-onboard"><div class="eyebrow">Onboard this vendor</div>
+  return `<section class="c-card w-onboard"><h2 class="c-h">Onboard this vendor</h2>
     <p class="small muted">The agent held this invoice because the vendor isn't in the vendor master. If it's a real supplier,
       add it here and the agent re-checks the invoice. The bank account must come from the vendor's KYC or a phone call,
       not from the invoice.</p>
@@ -181,8 +272,8 @@ function onboardHtml(o) {
     </div>
     <label class="w-verify"><input type="checkbox" id="onb-msme"> MSME vendor (Udyam registered: must be paid within 45 days)</label>
     <label class="w-verify"><input type="checkbox" id="onb-verified"> I verified this vendor's identity and bank account (KYC documents or a call on a known number)</label>
-    <div class="w-btns"><button type="button" class="w-btn ghost" id="onb-go">Onboard vendor &amp; re-check invoice</button></div>
-  </div>`;
+    <div class="c-btns"><button type="button" class="c-btn primary" id="onb-go">Onboard vendor &amp; re-check invoice</button></div>
+  </section>`;
 }
 
 function bindOnboard(x) {
@@ -215,17 +306,17 @@ const tidy = (b) => String(b || "").replace(/^\s*Dear[^\n]*\n+/, "").split(/\n\s
 function sideHtml(x) {
   const o = x.owner;
   const waitingFor = x.recommendation !== "APPROVE" && o.due
-    ? `<div class="w-wait">${ICON.clock}<span>Waiting for ${esc(o.name)} · answer by ${esc(dueTxt(o.due))}, then it goes to ${esc(o.escalate_to)}</span></div>` : "";
-  const sim = x.reply_examples.length ? `<div class="w-card w-sim"><div class="eyebrow">Simulate a reply</div>
-      <p class="muted small">In production replies arrive by email through n8n. Try one:</p>
-      <div class="w-sim-btns">${x.reply_examples.map((e, i) => `<button type="button" class="w-chip" data-ex="${i}">${esc(e.label)}</button>`).join("")}</div></div>` : "";
+    ? `<div class="w-wait">${ICON.clock}<span>Waiting for ${esc(o.name)} · reply by ${esc(dueTxt(o.due))}, then it goes to ${esc(o.escalate_to)}</span></div>` : "";
+  const sim = x.reply_examples.length ? `<section class="c-card w-sim"><h2 class="c-h">Try a reply (demo)</h2>
+      <p class="muted small">In real use, replies arrive by email through n8n. Pretend one came in:</p>
+      <div class="w-sim-btns">${x.reply_examples.map((e, i) => `<button type="button" class="w-chip" data-ex="${i}">${esc(e.label)}</button>`).join("")}</div></section>` : "";
   return `
-    <div class="w-card"><div class="eyebrow">${x.recommendation === "APPROVE" ? "Final OK from" : "Who can resolve it"}</div>
+    <section class="c-card"><h2 class="c-h">${x.recommendation === "APPROVE" ? "Final OK from" : "Who can sort it out"}</h2>
       <div class="w-owner"><div class="w-avatar">${esc(initials(o.name))}</div>
         <div><strong>${esc(o.name)}</strong><div class="muted small">${esc(o.sub)}${o.more ? ` (+${o.more} more)` : ""}</div></div></div>
-      ${o.question ? `<p class="w-q">“${esc(o.question)}”</p>` : ""}</div>
-    <div class="w-card w-disc" id="w-disc" data-run="${esc(x.id)}"><div class="eyebrow">Discussion</div>
-      ${waitingFor}<div class="disc-body"><p class="muted small">Loading…</p></div></div>
+      ${o.question ? `<p class="w-q">“${esc(o.question)}”</p>` : ""}</section>
+    <section class="c-card w-disc" id="w-disc" data-run="${esc(x.id)}"><h2 class="c-h">Discussion</h2>
+      ${waitingFor}<div class="disc-body"><p class="muted small">Loading…</p></div></section>
     ${sim}`;
 }
 
@@ -270,8 +361,6 @@ async function decide(x, act) {
     W.items = W.items.filter((i) => i.id !== x.id);
     refreshBadge(W.items.length);
     renderList();
-    $("#w-sum").textContent = shortInr(W.items.reduce((a, i) => a + (i.total || 0), 0));
-    $("#w-count").textContent = W.items.length ? `${W.items.length} invoice${W.items.length > 1 ? "s" : ""} need your decision` : "Nothing needs you right now";
   } catch (e) {
     toast(e.message);
     document.querySelectorAll(".w-btn").forEach((b) => (b.disabled = false));
@@ -291,16 +380,18 @@ function renderDone(d) {
     : `<li class="on">Rejected by ${esc(run.resolution.by)}${run.resolution.note ? `: “${esc(run.resolution.note)}”` : ""}</li>
        <li class="on">Removed from the payment queue. The PO balance is released.</li>`;
   $("#w-detail").innerHTML = `
-    <div class="w-card w-done ${act === "approve" ? "approve" : "reject"}" role="status">
+    <div class="c-card w-done ${act === "approve" ? "approve" : "reject"}" role="status">
       <div class="eyebrow tone">${act === "approve" ? "Approved" : "Rejected"}</div>
       <h1>${esc(x.vendor)} · <span class="mono">${shortInr(x.total)}</span></h1>
       <ol class="w-steps">${steps}</ol>
       <div class="w-btns">
-        ${W.items.length ? `<button type="button" class="w-btn approve" id="w-next">Next invoice →</button>` : `<span class="muted">That was the last one. Nothing else is waiting for you.</span>`}
-        ${act === "approve" ? `<button type="button" class="w-btn ghost" id="w-pay">See it in Payments</button>` : ""}
+        ${W.items.length ? `<button type="button" class="c-btn primary" id="w-next">Next invoice →</button>` : `<span class="muted">That was the last one. Nothing else is waiting for you.</span>`}
+        <button type="button" class="c-btn ghost" id="w-all">All invoices</button>
+        ${act === "approve" ? `<button type="button" class="c-btn ghost" id="w-pay">See it in Payments</button>` : ""}
       </div>
     </div>`;
-  $("#w-next")?.addEventListener("click", () => { delete W.done[x.id]; W.sel = W.items[0]?.id || null; renderList(); renderDetail(); });
+  $("#w-next")?.addEventListener("click", () => { delete W.done[x.id]; openDetail(W.items[0].id); });
+  $("#w-all")?.addEventListener("click", backToList);
   $("#w-pay")?.addEventListener("click", () => show("payments"));
 }
 
@@ -308,21 +399,21 @@ function move(delta) {
   if (!W.items.length) return;
   const i = W.items.findIndex((x) => x.id === W.sel);
   if (W.done[W.sel]) delete W.done[W.sel];
-  W.sel = W.items[(Math.max(i, 0) + delta + W.items.length) % W.items.length].id;
-  renderList(); renderDetail();
-  document.querySelector(".w-item.sel")?.scrollIntoView({ block: "nearest" });
+  openDetail(W.items[(Math.max(i, 0) + delta + W.items.length) % W.items.length].id);
 }
 document.addEventListener("keydown", (e) => {
   if ($("#view-waiting").hidden || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.target.closest("input, textarea, select")) return;
   const k = e.key.toLowerCase();
-  if (k === "j" || e.key === "ArrowDown") { e.preventDefault(); move(1); }
-  else if (k === "k" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-  else if (k === "a" || k === "r") {
+  if (e.key === "Escape" && W.mode === "detail") { backToList(); return; }
+  if (k === "j") { e.preventDefault(); move(1); }
+  else if (k === "k") { e.preventDefault(); move(-1); }
+  else if ((k === "a" || k === "r") && W.mode === "detail") {
     const x = W.items.find((i) => i.id === W.sel);
     if (x && !W.done[x.id]) decide(x, k === "a" ? "approve" : "reject");
   }
 });
+document.addEventListener("click", (e) => { if (e.target.closest("#w-back")) backToList(); });
 
 /* light / dark, remembered per browser */
 function localGet(k) { try { return localStorage.getItem("invoice-desk:" + k); } catch (_) { return null; } }
