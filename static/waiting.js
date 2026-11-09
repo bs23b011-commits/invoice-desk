@@ -219,6 +219,7 @@ function renderDetail() {
     </section>
     ${matchBlock(x.match)}
     <section class="c-card"><h2 class="c-h">The checks</h2>${checkChips(x)}</section>
+    ${x.test_setup ? testSetupHtml(x) : ""}
     ${x.onboard ? onboardHtml(x.onboard) : ""}
     <section class="c-card c-decide">
       <div class="c-impact"><span class="muted">${x.not_bill ? "What happens:" : "If you approve:"}</span> ${esc(x.impact)}</div>
@@ -238,6 +239,7 @@ function renderDetail() {
   $("#w-open").addEventListener("click", () => { state.open = new Set(["decision"]); state.lastStatus = {}; show("process"); openRun(x.id); });
   bindSim(x);
   if (x.onboard) bindOnboard(x);
+  if (x.test_setup) bindTestSetup(x);
   if (typeof loadDiscussion === "function") loadDiscussion(x.id);
 }
 
@@ -259,6 +261,39 @@ function renderUnreadable(x) {
   $("#w-side").innerHTML = sideHtml(x);
   if (typeof loadDiscussion === "function") loadDiscussion(x.id);
   $("#w-detail").querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => decide(x, b.dataset.act)));
+}
+
+function testSetupHtml(x) {
+  return `<section class="c-card w-test">
+    <div class="w-test-head"><span class="w-test-tag">For testers</span><h2 class="c-h">Testing with your own invoice?</h2></div>
+    <p>Your company and its purchase order aren't in our records yet, so the agent did the right thing and held it: a real
+      AP team never pays a vendor it doesn't know. To see the whole check run, let the agent create the records a real
+      company would already have: <b>this vendor, a purchase order for exactly these lines, and a goods receipt</b>.
+      Then it re-checks the invoice.</p>
+    <p class="small muted">Everything created is marked as test data. Records → "Clear imported data" removes it.
+      Real vendors are added with "Onboard this vendor", after a KYC or phone check.</p>
+    <div class="c-btns"><button type="button" class="c-btn primary" id="test-go">Test setup &amp; re-check</button></div>
+  </section>`;
+}
+
+function bindTestSetup(x) {
+  $("#test-go").addEventListener("click", async () => {
+    const fd = new FormData();
+    fd.append("who", ($("#w-who")?.value || "Tester").trim());
+    W.busy = true;
+    $("#test-go").disabled = true;
+    try {
+      const j = await api(`/api/runs/${x.id}/test-setup`, { method: "POST", body: fd });
+      toast(`Created ${j.made.join(", ")}. Re-checking the invoice…`);
+      for (let i = 0; i < 80; i++) {
+        const run = await api(`/api/runs/${x.id}`);
+        if (run.state !== "running") break;
+        await new Promise((ok) => setTimeout(ok, 300));
+      }
+    } catch (e) { toast(e.message); $("#test-go").disabled = false; }
+    W.busy = false;
+    await refreshWaiting();
+  });
 }
 
 function onboardHtml(o) {

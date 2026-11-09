@@ -292,3 +292,97 @@ def clear_imports():
     with store.connect(store.DB_PATH) as c:
         c.execute("DELETE FROM grn WHERE source = 'imported'")
     return dict(removed={k: len(v) for k, v in imp.items()})
+
+
+# ------------------------------------------------------------------------------------------- test setup
+PO_CODES = {"PO_NOT_FOUND", "PO_INVALID", "PO_MISSING"}
+
+
+def can_test_setup(run: dict) -> bool:
+    """Someone testing with their own invoice: its company and PO can't be in our records yet. Offered only for a
+    vendor we don't know (or one an earlier test setup created) - for a real vendor, a missing PO is a real question."""
+    res = run.get("result") or {}
+    inv = res.get("invoice") or {}
+    codes = {h.get("code") for h in res.get("handoff") or []}
+    v = store.VENDORS_BY_ID.get(inv.get("vendor_id") or "")
+    ours = "VENDOR_UNKNOWN" in codes or bool(v and v.get("test_data") and codes & PO_CODES)
+    return (run.get("state") == "done" and not run.get("resolution") and ours
+            and inv.get("kind") in (None, "invoice") and bool(inv.get("lines")))
+
+
+def test_setup(run: dict, who: str = "Tester") -> dict:
+    """Make the records a real company would already have for this invoice - the vendor, a purchase order for
+    exactly these lines and a goods receipt for the goods - so a tester sees the whole check run end to end.
+    Everything created is labelled test data (Records -> Clear imported data removes it)."""
+    from datetime import date, timedelta
+
+    from .config import today
+    if not can_test_setup(run):
+        raise ValueError("Test setup is only for an invoice held because its vendor or PO isn't in our records")
+    inv = run["result"]["invoice"]
+    stages = {s["key"]: s for s in run.get("stages") or []}
+    fields = {f["field"]: f["value"] for f in ((stages.get("extract") or {}).get("data") or {}).get("fields") or []}
+    lines = [l for l in inv["lines"] if l.get("qty") and l.get("unit_price") is not None]
+    if not lines:
+        raise ValueError("No line items could be read from this invoice, so a matching PO can't be made")
+    imp = load()
+    made = []
+
+    # 1. the vendor (only if it isn't on file)
+    vendor = store.VENDORS_BY_ID.get(inv.get("vendor_id") or "")
+    if not vendor:
+        gstin = (inv.get("vendor_gstin") or fields.get("vendor_gstin") or "").strip().upper()
+        if not gstin_is_valid(gstin):
+            raise ValueError("This invoice has no valid vendor GSTIN, so a test vendor can't be created. "
+                             "Use 'Onboard this vendor' and type the GSTIN")
+        vendor = next((v for v in store.VENDORS if v["gstin"] == gstin), None)
+        if not vendor:
+            used = {v["id"] for v in store.VENDORS}
+            vendor = vendor_from_row(dict(name=(inv.get("vendor_name") or fields.get("vendor_name") or "Test vendor")[:80],
+                                          gstin=gstin, einvoice="yes" if inv.get("irn") else "no"), used)
+            # pay the account the invoice prints (it's test data); a real vendor's account comes from KYC
+            vendor["bank"] = inv.get("bank") or "TEST BANK ****0000"
+            vendor.update(test_data=True, onboarded_by=f"{who} (test setup)", onboarded_from=run["id"])
+            imp["vendors"].append(vendor)
+            made.append(f"vendor {vendor['name']} ({gstin})")
+
+    # 2. a purchase order for exactly these lines, dated before the invoice
+    quoted = (fields.get("po_number") or "").strip().upper()
+    known = {p["po_number"] for p in store.POS}
+    po_no = quoted if quoted and quoted not in known else None
+    if not po_no:
+        n = 1
+        while f"PO-TEST-{n:04d}" in known:
+            n += 1
+        po_no = f"PO-TEST-{n:04d}"
+    try:
+        inv_day = date.fromisoformat(inv.get("invoice_date") or "")
+    except ValueError:
+        inv_day = today()
+    po_day = inv_day - timedelta(days=7)
+    po_lines = [dict(description=l["description"], qty=l["qty"], unit_price=round(l["unit_price"], 4),
+                     amount=round(l["qty"] * l["unit_price"], 2), hsn=str(l.get("hsn") or "")) for l in lines]
+    po = dict(po_number=po_no, vendor_id=vendor["id"], date=po_day.isoformat(), status="open", lines=po_lines,
+              amount=round(sum(l["amount"] for l in po_lines), 2), source="imported", test_data=True)
+    imp["pos"] = [p for p in imp["pos"] if p["po_number"] != po_no] + [po]
+    made.append(f"purchase order {po_no} ({len(po_lines)} line{'s' if len(po_lines) > 1 else ''})")
+
+    # 3. goods receipts for the goods (services, SAC 99xx, have none)
+    n_grn = 0
+    for l in po_lines:
+        if l["hsn"].startswith("99"):
+            continue
+        g = dict(grn=f"GRN-TEST-{len(imp['receipts']) + 1:04d}", po_number=po_no, description=l["description"],
+                 qty=l["qty"], date=min(inv_day, today()).isoformat())
+        imp["receipts"].append(g)
+        store.insert_receipt(g["grn"], po_no, g["description"], g["qty"], g["date"], "imported")
+        n_grn += 1
+    if n_grn:
+        made.append(f"{n_grn} goods receipt{'s' if n_grn > 1 else ''}")
+    _save(imp)
+    apply()
+    text = "Test setup: created " + ", ".join(made) + " from this invoice, marked as test data"
+    store.add_event(run["id"], "master", f"{text} (by {who})", dict(po_number=po_no, vendor_id=vendor["id"], test=True))
+    store.add_comment(run["id"], "Agent", "note", text + ". Re-checking the invoice against them now.", dict(test=True))
+    facts = {} if po_no == quoted else dict(po_number=po_no, po_source="created by test setup")
+    return dict(vendor=vendor, po_number=po_no, made=made, facts=facts)

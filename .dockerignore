@@ -3,3 +3,8 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .git
+runtime-demo/
+samples_messy/*.png
+*.zip
+jeen-server.log
+invoice-desk-brain/

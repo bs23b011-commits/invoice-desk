@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from . import agent, config, store
+from . import agent, config, master, store
 from .integrations import SENSITIVE
 from .utils import fmt_inr
 
@@ -48,6 +48,7 @@ def _note(run: dict) -> str:
                          if n.get("code") in ("RCM", "PREVIOUS_BALANCE", "UNIT_CONVERTED"))
         return (f"Every check passed.{why} If you approve, I'll post it and {text}. Nothing moves until you do."
                 + (f" Note: {extra}" if extra else ""))
+    text = text.rstrip(". ")
     return f"{text[:1].upper()}{text[1:]}. {res.get('next_action') or ''}".strip()
 
 
@@ -163,6 +164,7 @@ def card(run: dict) -> dict:
         owner=_owner(run), thread=thread, impact=_impact(res), needs_phone_check=bool(codes & SENSITIVE),
         phone_reason=next((PHONE_REASON[c] for c in PHONE_REASON if c in codes), None),
         not_bill=inv.get("kind") not in (None, "invoice"), kind=KIND_LABEL.get(inv.get("kind") or ""),
+        test_setup=master.can_test_setup(run),
         msme=bool(inv.get("msme_deadline")), stages_done=sum(1 for s in run.get("stages") or [] if s.get("status")),
         comments=len(store.comments(run["id"])),
         batch=_batch(run),

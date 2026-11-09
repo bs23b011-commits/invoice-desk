@@ -1,3 +1,14 @@
+---
+title: Invoice Desk
+emoji: 🧾
+colorFrom: indigo
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: AP agent - reads, checks and recommends; a person approves
+---
+
 # Invoice Desk: an accounts-payable digital employee
 
 Zamp AI Solutions Analyst case study, **PS-1 (Finance / AP)**.
@@ -28,7 +39,7 @@ An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves
 
 **The hard set: 32/32.** 32 bad documents built from real complaints about AP tools (Stampli, BILL and Ramp reviews and forums, OCR failure-mode write-ups, Indian GST audits): credit notes and proformas that must never be paid, statements of account, an advance already paid, amount in words that disagrees with the figures, the 12% GST slab that GST 2.0 removed, a vendor's other-state GSTIN, reverse charge, scans fed sideways or upside down, a scanner's junk text layer, and invisible text that tries to instruct the AI. See [docs/HARD_CASES.md](docs/HARD_CASES.md) (`python scripts/run_hard.py`). The 20 messy scans and layouts in `samples_messy/` are 20/20.
 
-**274 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 9 for several invoices in one PDF, 15 for strange files and your own data (`tests/test_judge_kit.py`), 52 for the hard set and the common-sense checks (`tests/test_hard_cases.py`). All five n8n workflows tested live in n8n 1.123.
+**278 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 9 for several invoices in one PDF, 15 for strange files and your own data (`tests/test_judge_kit.py`), 52 for the hard set and the common-sense checks (`tests/test_hard_cases.py`), 4 for testing with your own invoice (`tests/test_test_setup.py`). All five n8n workflows tested live in n8n 1.123.
 
 ## The 11 stages (live on screen for every invoice)
 
@@ -60,6 +71,12 @@ The home screen lists every invoice that needs a person (fraud first, then holds
 - **Who can resolve it**, their question and deadline, and the **conversation** as chat bubbles. A demo button simulates their reply.
 - **Approve / Reject**, a note for the audit trail, and who is deciding. After approval it shows the posting and the payment being scheduled, step by step.
 - Keys: `J`/`K` next/previous, `A` approve, `R` reject. Light/dark switch in the top bar.
+
+**Testing with your own invoice?** Your company and its PO aren't in our records, so the agent holds it as "vendor not
+onboarded" - the right answer, because no AP team pays a vendor it doesn't know. The held invoice then shows a
+**Test setup & re-check** button: the agent creates the vendor, a purchase order for exactly those lines and a goods
+receipt (all marked test data; Records → Clear imported data removes them) and re-checks the invoice, so every stage
+runs end to end. It is only offered for unknown vendors: for a real vendor, a missing PO stays a question for Procurement.
 
 ## Jeen, the AP assistant
 
@@ -190,7 +207,7 @@ The demo's vendors and POs are fictional, so an invoice from your own supplier s
 # Python 3.11+, Tesseract (Windows: winget install UB-Mannheim.TesseractOCR | macOS: brew install tesseract tesseract-lang)
 pip install -r requirements.txt
 uvicorn app.main:app --reload             # http://localhost:8000
-STAGE_DELAY=0 python -m pytest -q         # 274 tests
+STAGE_DELAY=0 python -m pytest -q         # 278 tests
 python scripts/evaluate.py                # accuracy report -> docs/EVALUATION.md + dashboard
 python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVAL.md
 ```

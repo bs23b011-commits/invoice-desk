@@ -377,6 +377,21 @@ def onboard(rid: str, name: str = Form(...), gstin: str = Form(...), bank_name: 
     return J(dict(vendor=v, run_id=rid))
 
 
+@app.post("/api/runs/{rid}/test-setup")
+def test_setup(rid: str, who: str = Form("Tester")):
+    """Testing with your own invoice: create its vendor, a matching PO and goods receipt (marked test data),
+    then re-check the invoice so every stage runs end to end."""
+    run = store.get_run(rid)
+    if not run or not run.get("result"):
+        raise HTTPException(404, "Run not found")
+    try:
+        out = master.test_setup(run, (who or "Tester")[:60])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    pipeline.reprocess(rid, out["facts"], "test setup created " + ", ".join(out["made"]))
+    return J(dict(run_id=rid, po_number=out["po_number"], vendor=out["vendor"]["name"], made=out["made"]))
+
+
 # ================================================================== the invoice's discussion (@team, @Jeen)
 @app.get("/api/runs/{rid}/discussion")
 def get_discussion(rid: str):
