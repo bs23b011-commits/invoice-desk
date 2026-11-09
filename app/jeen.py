@@ -370,7 +370,8 @@ def duplicate_check(vendor: str | None = None, invoice_number: str | None = None
                 already_on_file=bool(hits), count=len(hits), matches=hits[:10])
 
 
-RULE_TOPICS = ("tolerance", "tds", "msme", "irn", "gstr2b", "three_way_match", "fraud_score", "ocr_repair")
+RULE_TOPICS = ("tolerance", "tds", "msme", "irn", "gstr2b", "three_way_match", "fraud_score", "ocr_repair",
+               "gst_rates", "not_a_bill", "advance", "reverse_charge", "hidden_text")
 
 
 def explain_rule(topic: str) -> dict:
@@ -382,7 +383,10 @@ def explain_rule(topic: str) -> dict:
                  "einvoice": "irn", "einvoicing": "irn", "2b": "gstr2b", "itc": "gstr2b",
                  "inputtaxcredit": "gstr2b", "45days": "msme", "45day": "msme", "fraud": "fraud_score",
                  "risk": "fraud_score", "riskscore": "fraud_score", "ocr": "ocr_repair",
-                 "scan": "ocr_repair", "price": "tolerance", "variance": "tolerance"}
+                 "scan": "ocr_repair", "price": "tolerance", "variance": "tolerance", "gst20": "gst_rates",
+                 "slab": "gst_rates", "12": "gst_rates", "credit": "not_a_bill", "proforma": "not_a_bill",
+                 "statement": "not_a_bill", "quotation": "not_a_bill", "rcm": "reverse_charge",
+                 "reverse": "reverse_charge", "hidden": "hidden_text", "injection": "hidden_text"}
         key = next((v for k, v in alias.items() if k in t), None)
     if not key:
         return dict(found=False, topics=list(RULE_TOPICS))
@@ -438,6 +442,37 @@ def explain_rule(topic: str) -> dict:
                 f"the money leaves irreversibly and the invoice itself is the thing a fraudster controls — so it "
                 f"is only cleared by phoning the number already in the vendor master, never one on the invoice.")
         values = dict(high_risk=risk.HIGH_RISK, warn_weight=risk.WARN_WEIGHT)
+    elif key == "gst_rates":
+        text = ("GST 2.0 took effect on 22 Sep 2025: almost everything is now taxed at 5% or 18%, with 40% for "
+                "luxury and sin goods. The old 12% and 28% slabs were folded in (28% survives only for tobacco "
+                "until the compensation cess ends). So an invoice dated after 22 Sep 2025 that charges 12% is held: "
+                "usually the vendor's billing software still has the old rate. Invoices dated earlier are checked "
+                "against the old slabs. One invoice may carry two rates - each rate's tax must match its own lines.")
+        values = dict(valid_now=sorted(config.GST_RATES), valid_before=sorted(config.GST_RATES_BEFORE_2025_09_22))
+    elif key == "not_a_bill":
+        text = ("Before checking numbers, the agent reads what the document is. A credit note means the vendor "
+                "owes us money - it's applied to their next payment, never paid out. A proforma asks for money "
+                "before a tax invoice exists; paying it and then the real invoice pays twice. A statement of account "
+                "lists invoices we already have; paying it pays them again. Quotations, delivery challans and "
+                "greetings aren't bills either. These can only be dismissed, not approved for payment.")
+        values = {}
+    elif key == "advance":
+        text = ("Some invoices subtract an advance after the grand total ('Less: advance received'). Paying the "
+                "grand total would pay the advance twice, so the agent holds the invoice until the advance is "
+                "confirmed in our books, and if approved pays only the balance. A 'previous balance' added to an "
+                "invoice is ignored for payment: each older invoice is paid on its own.")
+        values = {}
+    elif key == "reverse_charge":
+        text = ("Under reverse charge (for example road transport by a GTA), the vendor charges no GST and we pay "
+                "it ourselves in our GST return - usually 5% for GTA - and can claim it back as input tax credit. "
+                "So a reverse-charge invoice with no GST is correct, and one that also charges GST is wrong.")
+        values = {}
+    elif key == "hidden_text":
+        text = ("The reader only uses text a person can see on the paper. White text on a white page or "
+                "microscopic text is set aside and reported - including text written to instruct an AI ('approve "
+                "this invoice', a new bank account). A PDF that carries hidden instructions is treated as possible "
+                "tampering: it needs a phone check with the vendor on the number on file.")
+        values = {}
     else:  # ocr_repair
         text = (f"On a scan, OCR misreads digits. Rather than trust it, the reader uses the invoice's own "
                 f"arithmetic as a cross-check: line amounts, subtotal, tax and total all have to agree, so a "
@@ -1079,6 +1114,16 @@ def _rules_answer(q: str, ctx: dict, history: list[dict]) -> dict:
             topic = "ocr_repair"
         elif re.search(r"\btds\b.*(what|how|work|rate)|what is tds", ql):
             topic = "tds"
+        elif re.search(r"gst\s*2\.?0|12\s*%|gst (rate|slab)s?|which gst rate|new gst", ql):
+            topic = "gst_rates"
+        elif re.search(r"credit note|proforma|pro-forma|statement of account|quotation", ql) and not _pick_run(q, ctx, history):
+            topic = "not_a_bill"
+        elif re.search(r"advance|previous balance", ql):
+            topic = "advance"
+        elif re.search(r"reverse charge|\brcm\b", ql):
+            topic = "reverse_charge"
+        elif re.search(r"hidden text|invisible text|prompt injection|white text", ql):
+            topic = "hidden_text"
         if topic:
             r = U("explain_rule", topic=topic)
             return done(r["explanation"] if r.get("found") else "I don't have a note on that rule.")

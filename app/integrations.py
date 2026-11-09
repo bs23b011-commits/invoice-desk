@@ -27,7 +27,7 @@ from .config import APPROVER
 from .utils import fmt_inr
 
 LINK_TTL_DAYS = 7
-SENSITIVE = {"BANK_CHANGE", "IMPERSONATION", "FRAUD_HIGH"}
+SENSITIVE = {"BANK_CHANGE", "IMPERSONATION", "FRAUD_HIGH", "HIDDEN_TEXT"}
 
 
 # ------------------------------------------------------------------------------------------- config

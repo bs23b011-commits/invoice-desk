@@ -44,7 +44,10 @@ def _note(run: dict) -> str:
         why = ""
         if run.get("revisions"):
             why = f" I re-checked after: {run['revisions'][-1].get('reason', 'new information')}."
-        return f"Every check passed.{why} If you approve, I'll post it and {text}. Nothing moves until you do."
+        extra = " ".join(n["text"].split(". ")[0].rstrip(".") + "." for n in res.get("notes") or []
+                         if n.get("code") in ("RCM", "PREVIOUS_BALANCE", "UNIT_CONVERTED"))
+        return (f"Every check passed.{why} If you approve, I'll post it and {text}. Nothing moves until you do."
+                + (f" Note: {extra}" if extra else ""))
     return f"{text[:1].upper()}{text[1:]}. {res.get('next_action') or ''}".strip()
 
 
@@ -87,9 +90,26 @@ def _owner(run: dict) -> dict:
                 escalate_to=h.get("escalate_to"), more=len(hs) - 1)
 
 
+KIND_LABEL = {"credit_note": "credit note", "debit_note": "debit note", "proforma": "proforma invoice",
+              "quotation": "quotation", "statement": "statement of account", "challan": "delivery challan",
+              "purchase_order": "purchase order", "receipt": "receipt", "reminder": "payment reminder",
+              "not_invoice": "not an invoice"}
+PHONE_REASON = {"BANK_CHANGE": "New bank account on the invoice. Call them on the number on file first",
+                "IMPERSONATION": "Looks like another company using a known vendor's name. Verify by phone first",
+                "HIDDEN_TEXT": "Hidden text in the PDF. Confirm with the vendor by phone before paying",
+                "FRAUD_HIGH": "High fraud risk. Verify the vendor by phone first"}
+
+
 def _impact(res: dict) -> str:
     inv = res.get("invoice") or {}
     pay = res.get("payment")
+    if inv.get("kind") not in (None, "invoice"):
+        return (f"Nothing is posted or paid: this is a {KIND_LABEL.get(inv['kind'], 'document')}, not a bill. "
+                "Dismiss it once it's been handled.")
+    if inv.get("advance"):
+        bal = (inv.get("net_payable") or inv.get("total") or 0) - inv["advance"]
+        return (f"{fmt_inr(bal)} would be paid (the invoice total less the {fmt_inr(inv['advance'])} advance already "
+                f"paid), scheduled for {_day(inv.get('due_date')) or 'its due date'}")
     if res["decision"] == "APPROVE" and pay:
         when = _day(pay.get("due_date")) or "on terms"
         tds = f", after TDS {fmt_inr(pay['tds'])}" if pay.get("tds") else ""
@@ -141,6 +161,8 @@ def card(run: dict) -> dict:
         match=_match(run), risk=dict(score=risk.get("score", 0), level=risk.get("level"),
                                      signals=[s["label"] for s in risk.get("signals") or []]),
         owner=_owner(run), thread=thread, impact=_impact(res), needs_phone_check=bool(codes & SENSITIVE),
+        phone_reason=next((PHONE_REASON[c] for c in PHONE_REASON if c in codes), None),
+        not_bill=inv.get("kind") not in (None, "invoice"), kind=KIND_LABEL.get(inv.get("kind") or ""),
         msme=bool(inv.get("msme_deadline")), stages_done=sum(1 for s in run.get("stages") or [] if s.get("status")),
         comments=len(store.comments(run["id"])),
         batch=_batch(run),
@@ -157,5 +179,6 @@ def waiting() -> dict:
             items.append(card(run))
     order = {"UNREADABLE": 0, "REJECT": 0, "REVIEW": 1, "APPROVE": 2}
     items.sort(key=lambda c: (not c["msme"], order.get(c["recommendation"], 3), c["due_date"] or "9999"))
-    return dict(items=items, total=sum(c["total"] or 0 for c in items), total_text=fmt_inr(sum(c["total"] or 0 for c in items)),
+    owed = sum(c["total"] or 0 for c in items if not c.get("not_bill"))  # a credit note isn't money we owe
+    return dict(items=items, total=owed, total_text=fmt_inr(owed),
                 human_approval=config.human_approval(), approver=config.APPROVER)

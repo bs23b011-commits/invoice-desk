@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import threading
 import time
 import traceback
@@ -10,7 +11,7 @@ from datetime import datetime, timezone
 
 from . import (agent, checks, compliance, decision, erp, extract_llm, extract_rules, integrations, learning, matching,
                risk, store)
-from . import config, files, reader
+from . import config, files, reader, sense
 from .config import MIN_FIELD_CONFIDENCE, REPAIR_MIN_CORROBORATION, STAGE_DELAY
 from .reader import inspect, read_pdf
 from .utils import fmt_inr, norm_invoice_no
@@ -197,6 +198,11 @@ def _execute(run: dict, pdf: bytes):
             st.add("info", f"Deskewed by {doc.skew_deg:+.1f}° and OCR'd with Tesseract"
                            f"{' (English + Hindi: the page is in Hindi)' if doc.ocr_lang == 'eng+hin' else ''}: "
                            f"{len(doc.words)} words, mean confidence {doc.ocr_confidence:.0f}%")
+            if doc.rotated:
+                st.add("info", f"The scan was {'upside down' if doc.rotated == 180 else 'sideways'}: turned it "
+                               f"{doc.rotated}° to read it")
+            if doc.ocr_reason:
+                st.add("info", f"The PDF has a text layer, but {doc.ocr_reason}")
             if doc.ocr_confidence and doc.ocr_confidence < 70:
                 st.add("warn", "Low OCR confidence - scan quality is poor", code="OCR_QUALITY")
         else:
@@ -210,8 +216,21 @@ def _execute(run: dict, pdf: bytes):
                 st.add("warn", f"{doc.pages}-page document: only page{'s 1-' + str(doc.pages_read) if doc.pages_read > 1 else ' 1'} "
                                f"could be read ({why}). A person should check the lines and total on the rest",
                        code="PAGES_UNREAD", facts=dict(pages=doc.pages, read=doc.pages_read))
+        if doc.hidden_text:
+            h = doc.hidden_text
+            aimed = re.search(r"\b(ai|agent|assistant|model|llm|gpt|claude|ignore|instruction|approve|pre-?approved|"
+                              r"system)\b", h, re.I)
+            bank = re.search(r"bank|a/?c|ifsc|account", h, re.I)
+            st.add("warn", f"The PDF contains text nobody can see on the paper (white or microscopic): "
+                           f"'{h[:140]}{'…' if len(h) > 140 else ''}'."
+                           + (" It is written to instruct an automated reader. It was ignored - only visible text is "
+                              "read - but an invoice that tries to steer the checks is a red flag" if aimed else
+                              " It was ignored; only what a person can see is read")
+                           + (". It also mentions bank details: pay only the account on file" if bank else ""),
+                   code="HIDDEN_TEXT", facts=dict(text=h[:200]),
+                   tried=["Compared every character's colour and size with what prints on the page"])
         # these hold the invoice: a page nobody read could carry the real total
-        findings_by_stage["read"] = [x for x in st.s["findings"] if x.get("code") == "PAGES_UNREAD"]
+        findings_by_stage["read"] = [x for x in st.s["findings"] if x.get("code") in ("PAGES_UNREAD", "HIDDEN_TEXT")]
 
     # 3 ── extract ---------------------------------------------------------------------------------
     with Stage(run, "extract") as st:
@@ -298,6 +317,35 @@ def _execute(run: dict, pdf: bytes):
             st.add("info", "Prices are GST-inclusive - tax will be backed out before comparing to the PO")
         if not f["lines"]:
             st.add("warn", "No line items could be read", code="NO_ARITH")
+        kind = sense.doc_kind([l.text for l in doc.lines], f["total"]["raw"])
+        if kind["kind"] == "not_invoice" and doc.source == "ocr" and (doc.ocr_confidence or 0) < 75:
+            kind = dict(kind, kind="invoice")  # an unreadable scan isn't evidence that it isn't an invoice
+        run["doc_kind"] = kind["kind"]
+        if kind["kind"] != "invoice":
+            amt = f["total"]["value"]
+            what = {"credit_note": "a CREDIT NOTE", "debit_note": "a DEBIT NOTE", "proforma": "a PROFORMA invoice",
+                    "quotation": "a QUOTATION", "statement": "a STATEMENT OF ACCOUNT", "challan": "a DELIVERY CHALLAN",
+                    "purchase_order": "a PURCHASE ORDER", "receipt": "a RECEIPT", "reminder": "a payment REMINDER",
+                    "not_invoice": "not an invoice"}[kind["kind"]]
+            tail = {"credit_note": f"{f['vendor_name']['value'] or 'the vendor'} owes us "
+                                   f"{fmt_inr(abs(amt)) if amt else 'this amount'}"
+                                   + (f" against {kind['against']}" if kind["against"] else "")
+                                   + ". Nothing to pay: apply it to their next payment",
+                    "debit_note": "an extra charge on an earlier invoice"
+                                  + (f" ({kind['against']})" if kind["against"] else "")
+                                  + ". It needs the original invoice and the reason before anything is paid",
+                    "proforma": "it asks for money before a tax invoice exists. Paying it and then the tax invoice "
+                                "pays twice, and a proforma carries no input tax credit",
+                    "quotation": "an offer; nothing is owed",
+                    "statement": "a list of invoices, each checked and paid on its own. Paying the statement would "
+                                 "pay them twice",
+                    "not_invoice": "there is no invoice heading and no amounts on it",
+                    }.get(kind["kind"], kind["meaning"])
+            how = (f"heading '{kind['title']}'" if kind["title"] not in
+                   ("not a tax invoice", "negative total", "no invoice heading or amounts") else kind["meaning"])
+            st.add("warn", f"This is {what}, not a bill to pay" + ("" if how.startswith("heading") else f" ({how})")
+                   + f": {tail}", code="NOT_INVOICE",
+                   facts=dict(kind=kind["kind"], against=kind["against"], amount=fmt_inr(abs(amt)) if amt else "-"))
         findings_by_stage["extract"] = st.s["findings"]
 
     if facts.get("po_number"):
@@ -361,6 +409,53 @@ def _execute(run: dict, pdf: bytes):
                        tried=["Recomputed every line, subtotal, tax and total"])
         for r in checks.rate_findings(inv):
             st.add(r["status"], r["text"], code="GST_RATE")
+        tot = inv.get("total")
+        words = sense.amount_in_words(doc.text)
+        if words and tot is not None:
+            if abs(abs(words["value"]) - abs(tot)) > 1:
+                st.add("warn", f"Amount in words ('{words['raw'][:90]}' = {fmt_inr(words['value'])}) doesn't match the "
+                               f"total in figures ({fmt_inr(tot)}). Banks treat the words as the real amount; a "
+                               "mismatch is either a typo or an altered figure", code="WORDS_MISMATCH",
+                       facts=dict(words=fmt_inr(words["value"]), figures=fmt_inr(tot)),
+                       tried=["Read the amount in words and converted it to a number"])
+            else:
+                st.add("pass", f"Amount in words agrees with the total ({fmt_inr(tot)})")
+        adj = sense.adjustments([l.text for l in doc.lines], f["total"]["raw"])
+        inv["advance"] = adj["advance"] or 0
+        if adj["advance"]:
+            bal = round((tot or 0) - adj["advance"], 2)
+            shown = f" (the invoice shows {fmt_inr(adj['payable'])})" if adj["payable"] is not None else ""
+            st.add("warn", f"The invoice deducts an advance of {fmt_inr(adj['advance'])} after its total "
+                           f"('{adj['advance_raw'][:70]}'). Only the balance of {fmt_inr(bal)}{shown} is payable, and "
+                           "the advance must be in our books first. Paying the full total would pay the advance twice",
+                   code="ADVANCE_ADJUSTED", facts=dict(advance=fmt_inr(adj["advance"]), balance=fmt_inr(bal),
+                                                       vendor=inv.get("vendor_name")))
+            if adj["payable"] is not None and abs(adj["payable"] - bal) > 1:
+                st.add("warn", f"Balance printed ({fmt_inr(adj['payable'])}) isn't total minus advance ({fmt_inr(bal)})",
+                       code="VENDOR_ARITH")
+        if adj["previous"]:
+            st.add("info", f"The invoice also shows an older balance of {fmt_inr(adj['previous'])} "
+                           f"('{adj['previous_raw'][:60]}')"
+                           + (f" and a 'total due' of {fmt_inr(adj['payable'])}" if adj["payable"] else "")
+                           + f". Only this invoice's {fmt_inr(tot)} is approved here; older invoices are paid on their "
+                             "own, so nothing is paid twice", code="PREVIOUS_BALANCE")
+        rcm = sense.reverse_charge(doc.text)
+        if rcm:
+            base = checks.effective_subtotal(inv) or 0
+            r = rcm["rate"] or 5
+            gst = round(base * r / 100, 2)
+            charged = sum(t["amount"] or 0 for t in inv["taxes"])
+            run["rcm"] = dict(rate=r, amount=gst)
+            if charged > 1:
+                st.add("warn", f"Marked 'reverse charge' but the vendor also charged GST {fmt_inr(charged)}: under "
+                               "reverse charge we pay the GST, so the vendor must not", code="TAX_TYPE")
+            else:
+                st.add("info", f"Reverse charge applies ('{rcm['raw'][:50]}'): no GST on the invoice is correct. We "
+                               f"pay the GST ourselves - about {fmt_inr(gst)} at {r:g}% on {fmt_inr(base)} - in our "
+                               "GST return, and can usually claim it back as input tax credit", code="RCM")
+        if tot is not None and abs(tot) < 0.005 and run.get("doc_kind") == "invoice":
+            st.add("warn", "This invoice is for ₹0.00 (free replacement or sample): there is nothing to pay. It is "
+                           "kept for the records", code="ZERO_VALUE")
         st.s["data"] = dict(identities=ids, before=before if repair else None, repair=repair)
         findings_by_stage["validate"] = st.s["findings"]
 
@@ -423,8 +518,31 @@ def _execute(run: dict, pdf: bytes):
 
     # 9 ── tax & compliance ------------------------------------------------------------------------
     with Stage(run, "tax") as st:
+        qr = sense.read_qr(pdf)
+        tfacts = facts
+        if qr:
+            if qr["irn"] and not compliance.IRN_RE.search(doc.text or "") and not facts.get("irn"):
+                tfacts = dict(facts, irn=qr["irn"], irn_source="read from the e-invoice QR code - the printed IRN "
+                                                               "couldn't be read")
+            trusted = doc.source == "text-layer" or (ids and all(i["ok"] for i in ids))
+            odd = []
+            if qr["total"] is not None and inv.get("total") is not None and trusted and abs(qr["total"] - inv["total"]) > 1:
+                odd.append(f"invoice value {fmt_inr(qr['total'])} in the QR vs {fmt_inr(inv['total'])} on the page")
+            if qr["number"] and inv.get("invoice_number") and norm_invoice_no(qr["number"]) != norm_invoice_no(
+                    inv["invoice_number"]) and trusted:
+                odd.append(f"document number {qr['number']} in the QR vs {inv['invoice_number']} on the page")
+            if qr["seller"] and inv.get("vendor_gstin") and qr["seller"] != inv["vendor_gstin"]:
+                odd.append(f"seller GSTIN {qr['seller']} in the QR vs {inv['vendor_gstin']} on the page")
+            if odd:
+                st.add("warn", "The e-invoice QR code doesn't match the page: " + "; ".join(odd) + ". The QR is "
+                               "signed when the e-invoice is issued, so the page was changed afterwards or the QR "
+                               "was copied from another invoice", code="IRN_MISMATCH",
+                       tried=["Decoded the e-invoice QR and compared it with the printed figures"])
+            elif qr["total"] is not None:
+                st.add("pass", f"E-invoice QR decoded: {qr['number'] or 'document'} for {fmt_inr(qr['total'])} - "
+                               "matches the page")
         fs, tdata, due = compliance.assess(inv, doc.text, vendor, po_view, ledger, due,
-                                           compliance.load_gstr2b(store.DATA / "gstr2b.json"), facts)
+                                           compliance.load_gstr2b(store.DATA / "gstr2b.json"), tfacts)
         for x in fs:
             st.add(**x)
         cur = compliance.foreign_currency(doc.text)
@@ -441,7 +559,8 @@ def _execute(run: dict, pdf: bytes):
         ctx = dict(vendor=vendor, vendor_name=inv.get("vendor_name"), total=inv.get("total"), due_date=due,
                    invoice_number=inv.get("invoice_number"), invoice_date=inv.get("invoice_date"),
                    po_number=po["po_number"] if po else None,
-                   confidence=min(key_conf) if key_conf else 0.0, tds=tdata.get("tds_total"))
+                   confidence=min(key_conf) if key_conf else 0.0, tds=tdata.get("tds_total"),
+                   advance=inv.get("advance") or 0)
         res = decision.decide(findings_by_stage, ctx)
         impostor = bool(vendor and how == "name match" and inv.get("vendor_gstin")
                         and inv["vendor_gstin"] != vendor["gstin"])
@@ -457,7 +576,8 @@ def _execute(run: dict, pdf: bytes):
                               lines=[dict(description=l["description"], qty=l["qty"], unit_price=l["unit_price"],
                                           amount=l["amount"], hsn=l.get("hsn")) for l in net_lines],
                               taxes=[dict(type=t["type"], rate=t.get("rate"), amount=t["amount"]) for t in inv["taxes"]],
-                              repaired=bool(repair),
+                              repaired=bool(repair), advance=inv.get("advance") or 0, kind=run.get("doc_kind"),
+                              rcm=run.get("rcm"),
                               bank=inv.get("bank"),  # as printed on the invoice; payment always uses the master's
                               vendor_name=inv.get("vendor_name"), vendor_gstin=inv.get("vendor_gstin"))
         run["result"] = res
@@ -465,7 +585,7 @@ def _execute(run: dict, pdf: bytes):
         run["total"] = inv.get("total")
         st.add({"APPROVE": "pass", "REVIEW": "warn", "REJECT": "fail"}[res["decision"]], res["headline"])
         # ledger: approved invoices consume the PO; reviews are recorded (so they count for duplicates) but don't
-        if vendor and res["decision"] in ("APPROVE", "REVIEW"):
+        if vendor and res["decision"] in ("APPROVE", "REVIEW") and run.get("doc_kind") == "invoice":
             store.add_ledger(dict(vendor_id=vendor["id"], invoice_number=inv.get("invoice_number") or "",
                                   invoice_date=inv.get("invoice_date"), po_number=po["po_number"] if po else None,
                                   subtotal=subtotal or 0, tax=tax_total, total=inv.get("total") or 0,
@@ -516,6 +636,9 @@ def resolve(run_id: str, action: str, note: str, who: str = "AP reviewer", via: 
     if decision != "REVIEW" and not (res.get("awaiting_human") and decision in ("APPROVE", "REJECT")):
         raise ValueError("Only invoices waiting for a person can be approved or rejected")
     status = "APPROVE" if action == "approve" else "REJECT"
+    if status == "APPROVE" and (res.get("invoice") or {}).get("kind") not in (None, "invoice"):
+        raise ValueError("This document isn't a bill (" + str(res["invoice"]["kind"]).replace("_", " ") + "), so it "
+                         "can't be posted or paid. Dismiss it, or ask the vendor for the tax invoice")
     if status == "APPROVE" and not verified and any(h["code"] in integrations.SENSITIVE for h in res.get("handoff") or []):
         raise ValueError("Approving a bank-detail change needs a phone check with the vendor first, on the number "
                          "already in the vendor master")
@@ -554,7 +677,9 @@ def _post_after_human_approval(run: dict):
     inv = res["invoice"]
     tds = inv.get("tds") or 0
     vendor = store.VENDORS_BY_ID.get(inv.get("vendor_id")) or {}
-    res["payment"] = dict(amount=round((inv.get("total") or 0) - tds, 2), gross=inv.get("total"), tds=tds,
+    adv = inv.get("advance") or 0
+    res["payment"] = dict(amount=round((inv.get("total") or 0) - tds - adv, 2), gross=inv.get("total"), tds=tds,
+                          advance=adv,
                           due_date=inv.get("due_date"), bank=vendor.get("bank"))  # always the account on file
     res["awaiting_human"] = False
     st = next((s for s in run["stages"] if s["key"] == "post"), None)

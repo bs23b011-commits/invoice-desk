@@ -38,7 +38,10 @@ def build_handoff(items: list[tuple[str, dict]], ctx: dict) -> list[dict]:
     # A duplicate re-bills a PO that the original already used up: the PO warnings are a consequence, not a
     # second problem. Same for a frozen high-risk invoice.
     codes = {g["code"] for g in groups.values()}
-    if codes & {"DUPLICATE", "FRAUD_HIGH"}:
+    if "NOT_INVOICE" in codes:  # a credit note or a proforma isn't checked against a PO or the IRN rules for bills
+        keep = {"NOT_INVOICE", "FRAUD_HIGH", "BANK_CHANGE", "IMPERSONATION", "HIDDEN_TEXT", "VENDOR_BLOCKED"}
+        groups = {k: g for k, g in groups.items() if g["code"] in keep}
+    elif codes & {"DUPLICATE", "FRAUD_HIGH"}:
         groups = {k: g for k, g in groups.items() if not g["code"].startswith(("PO_", "IRN_", "GRN_"))}
     order = {"fail": 0, "warn": 1}
     return sorted(groups.values(), key=lambda g: (order[g["severity"]], g["sla_hours"]))
@@ -55,6 +58,9 @@ def _headline(prefix: str, handoff: list[dict]) -> str:
 
 def decide(stage_findings: dict[str, list[dict]], ctx: dict) -> dict:
     fails = [(s, f) for s, fs in stage_findings.items() for f in fs if f["status"] == "fail"]
+    if any(f.get("code") == "NOT_INVOICE" for fs in stage_findings.values() for f in fs):
+        # not a bill: "reject as a duplicate" would be the wrong advice for a statement listing old invoices
+        fails = [(s, f) for s, f in fails if f.get("code") in ("FRAUD_HIGH", "VENDOR_BLOCKED")]
     warns = [(s, f) for s, fs in stage_findings.items() for f in fs if f["status"] == "warn"]
     infos = [(s, f) for s, fs in stage_findings.items() for f in fs if f["status"] == "info"]
     vendor = ctx.get("vendor")
@@ -82,8 +88,10 @@ def decide(stage_findings: dict[str, list[dict]], ctx: dict) -> dict:
         route = " + ".join(dict.fromkeys(h["owner"] for h in handoff))
         next_action = (f"Hold payment. {len(handoff)} question{'s' if len(handoff) > 1 else ''} sent to {route}. "
                        "Approve or reject once answered.")
+        if top["code"] == "NOT_INVOICE":
+            next_action = "Nothing is posted or paid. Dismiss it once it has been handled."
         po_items = [f["text"] for s, f in warns if s == "po" and (f.get("code") or "").startswith("PO_")]
-        if po_items and not any(h["code"] in ("BANK_CHANGE", "IMPERSONATION") for h in handoff):
+        if po_items and not any(h["code"] in ("BANK_CHANGE", "IMPERSONATION", "NOT_INVOICE", "HIDDEN_TEXT") for h in handoff):
             email = _vendor_email(ctx, "review_po", po_items)
     else:
         decision = "APPROVE"
@@ -91,7 +99,7 @@ def decide(stage_findings: dict[str, list[dict]], ctx: dict) -> dict:
         overdue = bool(due) and date.fromisoformat(due) < today()
         when = f"in the next payment run (was due {due_txt})" if overdue else f"on {due_txt}"
         tds = ctx.get("tds") or 0
-        pay = round((total or 0) - tds, 2)
+        pay = round((total or 0) - tds - (ctx.get("advance") or 0), 2)
         less = f" ({fmt_inr(total)} less TDS {fmt_inr(tds)})" if tds else ""
         if human_approval():
             headline = f"Recommend approval: pay {fmt_inr(pay)} to {vname}{less} {when}"
@@ -116,7 +124,8 @@ def _out(decision, headline, route, next_action, handoff, fails, warns, infos, c
                 reasons=[dict(stage=s, **f) for s, f in fails + warns],
                 notes=[dict(stage=s, **f) for s, f in infos],
                 confidence=round(conf, 2), vendor_email=email,
-                payment=dict(amount=round((total or 0) - (ctx.get("tds") or 0), 2), gross=total, tds=ctx.get("tds") or 0,
+                payment=dict(amount=round((total or 0) - (ctx.get("tds") or 0) - (ctx.get("advance") or 0), 2),
+                             gross=total, tds=ctx.get("tds") or 0, advance=ctx.get("advance") or 0,
                              due_date=due, bank=vendor["bank"] if vendor else None)
                 if decision == "APPROVE" else None,
                 # the agent only recommends; a person makes the final call (config.human_approval)

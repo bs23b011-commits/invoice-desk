@@ -39,7 +39,8 @@ def page_facts(pdf_bytes: bytes, i: int, scanned: bool) -> dict:
     val = lambda k: (f.get(k) or {}).get("value") if isinstance(f.get(k), dict) else f.get(k)
     number = val("invoice_number")
     gstin = val("vendor_gstin")
-    head = "\n".join(text.splitlines()[:12])
+    # a heading is a short line that says INVOICE, not a sentence that mentions one ("limited to the invoice value")
+    head = "\n".join(l for l in text.splitlines()[:12] if len(l.split()) <= 8 or re.search(r"\bTAX INVOICE\b|\bINVOICE\b", l))
     v = next((v for v in store.VENDORS if gstin and v["gstin"] == gstin), None)
     return dict(index=i, scanned=scanned, number=number, gstin=gstin, total=val("total"),
                 heading=bool(HEADING_RE.search(head)), vendor=(v["name"] if v else val("vendor_name") or "")[:60])
@@ -62,7 +63,8 @@ def analyse(pdf_bytes: bytes) -> dict:
             starts = True  # a different invoice number
         elif cur and p["gstin"] and cur["gstin"] and p["gstin"][:12] != cur["gstin"][:12]:
             starts = True  # another vendor's invoice
-        elif cur and cur["total"] and (p["gstin"] or p["heading"]) and not (p["number"] and cur["number"]):
+        elif (cur and cur["total"] and (p["gstin"] or p["heading"]) and not (p["number"] and cur["number"])
+              and (p["number"] or p["gstin"] or p["total"])):  # a terms page has none of these: it continues
             starts = True  # the invoice before already ended (it has its total) and a new vendor header begins
         if (not starts and p["number"] and cur["number"] and same(p["number"], cur["number"])
                 and p["total"] and cur["total"] and abs(p["total"] - cur["total"]) < 1):

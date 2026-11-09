@@ -15,8 +15,11 @@ from .utils import GSTIN_RE, gstin_checksum, gstin_is_valid, norm_po, parse_date
 
 LABELS = {
     "invoice_number": [r"invoice\s*(?:no|number|#)\.?", r"bill\s*(?:no|number|#)\.?", r"inv\.?\s*(?:no|#)\.?",
-                       r"document\s*(?:no|number|#)\.?", r"tax\s*inv(?:oice|\.)?\s*ref\.?"],
-    "invoice_date": [r"invoice\s*date", r"issue\s*date", r"bill\s*date", r"(?<!due\s)\bdate\b"],
+                       r"document\s*(?:no|number|#)\.?", r"tax\s*inv(?:oice|\.)?\s*ref\.?",
+                       r"(?:credit|debit)\s*(?:note|memo)\s*(?:no|number|#)\.?", r"memo\s*(?:no|number|#)\.?",
+                       r"p\.?i\.?\s*(?:no|number|#)\.?", r"pro[\s\-]?forma\s*(?:invoice\s*)?(?:no|number|#)\.?",
+                       r"quot(?:e|ation)\s*(?:no|number|#)\.?", r"challan\s*(?:no|number|#)\.?"],
+    "invoice_date": [r"invoice\s*date", r"issue\s*date", r"bill\s*date", r"(?<!due\s)\bdate\b", r"\bdated\b"],
     "due_date": [r"due\s*date"],
     "po_number": [r"po\s*ref\.?", r"purchase\s*order(?:\s*no\.?)?", r"p\.?o\.?\s*(?:no|number|#)\.?",
                   r"your\s*ref\.?"],
@@ -35,6 +38,8 @@ TOTAL_RE = re.compile(r"grand\s*total|total\s*due|amount\s*payable|net\s*amount|
                       r"net\s*payable|total\s*payable|amount\s*due|balance\s*due|invoice\s*value|"
                       r"total\s*\(inclusive|^total\b", re.I)
 CURRENCY_RE = re.compile(r"(?i)(?:\brs\.?|\binr\b|₹)\s*")
+DISC_RE = re.compile(r"\bless\b|discount|rebate|\bdisc\.?\b", re.I)
+ADD_RE = re.compile(r"\badd\b|freight|packing|forwarding|insurance|cartage|handling\s+charges", re.I)
 INCLUSIVE_RE = re.compile(r"inclusive\s+of\s+(?:gst|tax)|included\s+in\s+above", re.I)
 GSTIN_SHAPE = "DDLLLLLDDDDLAZA"  # D digit, L letter, A alphanumeric, Z literal 'Z'
 TO_DIGIT = {"O": "0", "Q": "0", "D": "0", "I": "1", "L": "1", "Z": "2", "S": "5", "B": "8", "G": "6", "T": "7"}
@@ -180,6 +185,18 @@ def _value_below(lines: list[Line], li: int, label_words: list[Word]) -> list[Wo
     return []
 
 
+def _value_above(lines: list[Line], li: int, label_words: list[Word]) -> list[Word]:
+    """Designer layouts print the value and put a small caption under it ('2026-10-25' / 'dated')."""
+    lx0, lx1 = label_words[0].x0, label_words[-1].x1
+    for prv in reversed(lines[max(0, li - 2):li]):
+        if lines[li].top - prv.top > 22:
+            break
+        cands = [w for w in prv.words if abs(w.x1 - lx1) <= 8 or (w.x0 <= lx1 and w.x1 >= lx0)]
+        if cands:
+            return cands[-1:]
+    return []
+
+
 def _find_labeled(doc: Document, key: str):
     hit = _find_labeled_latin(doc, key)
     if hit or not doc.has_hindi:
@@ -213,6 +230,14 @@ def _find_labeled_latin(doc: Document, key: str):
                                  ("label → below", _value_below(doc.lines, li, line.words[s:e + 1]))):
                 if vals and _clean(key, " ".join(w.text for w in vals)) is not None:
                     return " ".join(w.text for w in vals), method, _line_conf(vals), vals
+    for pat in LABELS[key]:  # last resort: caption under its value
+        for li, line in enumerate(doc.lines):
+            hit = _find_label(line, pat)
+            if not hit or hit[1] != len(line.words) - 1:  # the caption ends its line
+                continue
+            vals = _value_above(doc.lines, li, line.words[hit[0]:hit[1] + 1])
+            if vals and _clean(key, " ".join(w.text for w in vals)) is not None:
+                return " ".join(w.text for w in vals), "caption → value above", _line_conf(vals) * 0.95, vals
     return None
 
 
@@ -300,6 +325,47 @@ def _gstin_candidates(doc: Document) -> list[tuple[str, list[Word]]]:
     return out
 
 
+def _card_items(doc: Document, base_conf: float) -> list[dict]:
+    """Items drawn as cards ('quantity 4 / rate 23,500.00 / line amount 94,000.00', two cards side by side)
+    instead of table rows. Each card is cut out by the x-position of its 'quantity' label. A card only counts if
+    its own numbers agree (quantity x rate = amount), so this can't invent line items."""
+    num = re.compile(r"\d[\d,]*(?:\.\d+)?")
+    ql = [(li, w) for li, l in enumerate(doc.lines) for w in l.words if re.fullmatch(r"(?i)qty\.?|quantity", w.text)]
+    items = []
+    for li, qw in ql:
+        right = min([w.x0 for lj, w in ql if lj == li and w.x0 > qw.x0] or [1e9]) - 2
+        inbox = lambda w, a=qw.x0 - 2, b=right: a <= w.x0 < b
+
+        def value(label):
+            for l in doc.lines[li:li + 5]:
+                ws = [w for w in l.words if inbox(w)]
+                if ws and re.match(label, " ".join(w.text for w in ws), re.I):
+                    nums = [w for w in ws if num.fullmatch(w.text)]
+                    if nums:
+                        return parse_money(nums[-1].text), ws
+            return None, []
+        qty, _ = value(r"(?:qty|quantity)\b")
+        rate, _ = value(r"(?:rate|price|unit\s*price)\b")
+        amt, aws = value(r"(?:line\s*)?(?:amount|total|value)\b")
+        if None in (qty, rate, amt) or abs(qty * rate - amt) > 1:
+            continue
+        desc, hsn = None, None
+        for l in reversed(doc.lines[max(0, li - 5):li]):
+            ws = [w for w in l.words if inbox(w)]
+            t = " ".join(w.text for w in ws)
+            m = re.match(r"(?i)(?:hsn|sac)\s*[:.]?\s*(\d{4,8})", t)
+            if m:
+                hsn = hsn or m.group(1)
+            elif ws and re.search(r"[A-Za-z]{3}", t):
+                desc = t
+                break
+        if desc:
+            items.append({"description": desc, "hsn": hsn, "qty": qty, "unit": None, "unit_price": rate, "amount": amt,
+                          "confidence": round(base_conf * 0.95, 2), "raw": f"{desc} | {qty:g} x {rate} = {amt}",
+                          "box": doc.box(aws)})
+    return items
+
+
 def hamming(a: str, b: str) -> int:
     return sum(x != y for x, y in zip(a, b)) + abs(len(a) - len(b))
 
@@ -341,6 +407,7 @@ def extract(doc: Document, buyer_gstin: str) -> dict:
         if g2 not in [x[0] for x in gstins]:
             gstins.append((g2, fixed, g))
             gbox[g2] = doc.box(ws)
+    f["gstins"] = [g[0] for g in gstins]  # every GSTIN printed (bill-to of another company shows up here)
     buyer_g = next((g for g in gstins if hamming(g[0], buyer_gstin) <= 2), None)
     if buyer_g and buyer_g[0] != buyer_gstin and doc.source == "ocr":
         buyer_g = (buyer_gstin, True, buyer_g[2])
@@ -357,7 +424,9 @@ def extract(doc: Document, buyer_gstin: str) -> dict:
 
     vendor_name, vn_words = None, []
     for line in doc.lines[:4]:
-        t = re.sub(r"\b(TAX\s+INVOICE|INVOICE)\b", "", line.text, flags=re.I).strip(" |-")
+        t = re.sub(r"\b(TAX\s+INVOICE|PRO[\s\-]?FORMA\s+INVOICE|INVOICE|CREDIT\s+(?:NOTE|MEMO)|DEBIT\s+(?:NOTE|MEMO)|"
+                   r"QUOTATION|STATEMENT\s+OF\s+ACCOUNTS?|DELIVERY\s+CHALLAN|BILL\s+OF\s+SUPPLY)\b", "", line.text,
+                   flags=re.I).strip(" |-")
         if len(re.findall(r"[A-Za-z]", t)) >= 6 and not re.match(r"^(no\.?|s\.?no|plot|\d)", t, re.I):
             vendor_name = t
             vn_words = [w for w in line.words if not re.fullmatch(r"(?i)tax|invoice|\|", w.text)]
@@ -387,11 +456,14 @@ def extract(doc: Document, buyer_gstin: str) -> dict:
             "unit_price": rate, "amount": amt, "confidence": round(min(base_conf, _line_conf(line.words)), 2),
             "raw": t, "box": doc.box(line.words),
         })
+    if not items:
+        items = _card_items(doc, base_conf)
     f["lines"] = items
 
     # --- totals --------------------------------------------------------------------------------
     subtotal = total = None
     taxes = []
+    adjustments = []  # discounts / charges printed between the lines and the taxable value
     inclusive = bool(INCLUSIVE_RE.search(text))
     for line in doc.lines:
         t = line.text
@@ -406,6 +478,19 @@ def extract(doc: Document, buyer_gstin: str) -> dict:
         hi = _hi_total(t) if doc.has_hindi else None
         if (SUBTOTAL_RE.search(t) or hi == "subtotal") and subtotal is None:
             subtotal = (amt, t, _line_conf(line.words), bx, hi)
+        elif (SUBTOTAL_RE.search(t) and subtotal is not None and adjustments and not taxes and total is None
+              and adjustments[-1]["after_subtotal"]):
+            # "Sub Total" (gross) - discount - "Taxable Value": the taxable value is the base for tax
+            for a in adjustments:
+                a["after_subtotal"] = False
+            gross_lines = subtotal
+            subtotal = (amt, t, _line_conf(line.words), bx, hi)
+        elif (total is None and not taxes and not TOTAL_RE.search(t.strip()) and items and not ITEM_RE.match(
+                  re.sub(r"\s+", " ", CURRENCY_RE.sub("", t)).strip()) and (DISC_RE.search(t) or ADD_RE.search(t))):
+            neg = bool(DISC_RE.search(t))
+            adjustments.append({"label": re.sub(r"\s*\(?-?\s*\d[\d,]*\.\d{2}\)?\s*$", "", t).strip(),
+                                "amount": -amt if neg else amt, "raw": t, "box": bx,
+                                "after_subtotal": subtotal is not None})
         elif tm:
             taxes.append({"type": tm.group(1).upper(), "rate": float(tm.group(2)) if tm.group(2) else None, "amount": amt,
                           "raw": t, "confidence": round(min(base_conf, _line_conf(line.words)), 2), "box": bx})
@@ -419,6 +504,8 @@ def extract(doc: Document, buyer_gstin: str) -> dict:
                         "Hindi label 'कुल योग'" if total and total[4] else "label 'Total'",
                         min(base_conf, total[2]) if total else 0.0, total[3] if total else None)
     f["taxes"] = taxes
+    # an adjustment printed after the subtotal that no later taxable value absorbed: it changes the taxable base
+    f["adjustments"] = [dict(a, after_subtotal=bool(a.get("after_subtotal"))) for a in adjustments]
     f["tax_inclusive"] = inclusive
 
     # --- payee bank (only what's printed; used by the fraud check) -----------------------------

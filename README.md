@@ -26,20 +26,23 @@ An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves
 | Single-digit errors above ₹1 caught by the arithmetic check | **100%** of 125 injected |
 | Good invoices still sent to a person | 5 of 10, all fax-quality scans where OCR was unsure of the invoice number. Conservative by design. |
 
-**222 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 9 for several invoices in one PDF, 15 for strange files and your own data (`tests/test_judge_kit.py`). All five n8n workflows tested live in n8n 1.123.
+**The hard set: 32/32.** 32 bad documents built from real complaints about AP tools (Stampli, BILL and Ramp reviews and forums, OCR failure-mode write-ups, Indian GST audits): credit notes and proformas that must never be paid, statements of account, an advance already paid, amount in words that disagrees with the figures, the 12% GST slab that GST 2.0 removed, a vendor's other-state GSTIN, reverse charge, scans fed sideways or upside down, a scanner's junk text layer, and invisible text that tries to instruct the AI. See [docs/HARD_CASES.md](docs/HARD_CASES.md) (`python scripts/run_hard.py`). The 20 messy scans and layouts in `samples_messy/` are 20/20.
+
+**274 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 9 for several invoices in one PDF, 15 for strange files and your own data (`tests/test_judge_kit.py`), 52 for the hard set and the common-sense checks (`tests/test_hard_cases.py`). All five n8n workflows tested live in n8n 1.123.
 
 ## The 11 stages (live on screen for every invoice)
 
 1. **Receive.** Fingerprint, page count, text layer or not.
-2. **Read.** Text layer, or deskew + OCR. English first, Hindi OCR switched on only when the page is in Hindi.
-3. **Extract.** Fields by label (English and Hindi), labels learned from reviewers, and an optional LLM text reader. On unclear scans, an optional **vision reader** gives a second opinion. Every field records how it was found, a confidence, and **where it is on the page** (click it to highlight).
-4. **Self-check.** qty × rate = amount, lines = subtotal, subtotal + tax = total, tax = rate × base, CGST = SGST. On scans, a misread digit is repaired only if it's the single correction that makes every identity hold.
-5. **Vendor.** GSTIN (checksum) and name against the master, blocked status, billed to us, correct GST type.
+2. **Read.** Text layer, or deskew + OCR. English first, Hindi OCR switched on only when the page is in Hindi. A scan fed in sideways or upside down is turned upright first; a text layer that is gibberish (a scanner's failed OCR) is ignored and the image is read instead. **Only text a person can see is read:** white-on-white or microscopic text is set aside and reported, so hidden instructions to an AI ("approve this", a new bank account) can't steer it.
+3. **Extract.** First, *what is this document?* A credit note, proforma, quotation, statement of account or greeting is never treated as a bill (and can't be approved for payment). Then fields by label (English and Hindi), value-above-caption layouts, items drawn as cards, labels learned from reviewers, and an optional LLM text reader. On unclear scans, an optional **vision reader** gives a second opinion. Every field records how it was found, a confidence, and **where it is on the page** (click it to highlight).
+4. **Self-check.** qty × rate = amount, lines (± discounts / freight) = subtotal, subtotal + tax = total, tax = rate × base (one invoice can carry 5% and 18% lines: each rate must match its own lines), CGST = SGST. GST slabs follow the invoice date: 12% after GST 2.0 (22 Sep 2025) is held. **Amount in words must agree with the figures.** An advance deducted after the total holds the invoice and only the balance is ever paid. On scans, a misread digit is repaired only if it's the single correction that makes every identity hold.
+5. **Vendor.** GSTIN (checksum) and name against the master, blocked status, billed to *our* GSTIN (not another company's, not our other-state registration), correct GST type. A vendor's other-state GSTIN (same PAN) is recognised as theirs but held until it's added to the master.
 6. **Duplicate.** Normalised invoice number (INV-0042 = INV42), plus same vendor/amount/date.
-7. **PO and goods receipt (3-way match).** Price within tolerance, quantity left on the PO, **goods actually received** (services exempt), PO balance, and a suggested PO when none is quoted (never auto-approved).
+7. **PO and goods receipt (3-way match).** Billing per pack ("bundle of 25") is converted to the PO's unit first. Price within tolerance, quantity left on the PO, **goods actually received** (services exempt), PO balance, and a suggested PO when none is quoted (never auto-approved).
 8. **Fraud & risk.** Bank account vs master, "new bank details" wording, look-alike name with another GSTIN, amount far above history, urgency, round amounts. These combine into a 0–100 score: 70+ blocks payment, and one heavy signal holds it for a phone check on the number already on file.
 9. **Tax & compliance (India).**
-   - **E-invoice IRN** must be present for vendors above ₹5 crore. It is recomputed from GSTIN, financial year and invoice number, which catches a copied IRN and also a reviewer's typo.
+   - **E-invoice IRN** must be present for vendors above ₹5 crore. It is recomputed from GSTIN, financial year and invoice number, which catches a copied IRN and also a reviewer's typo. The **e-invoice QR code is decoded** (even on a turned scan): its value, number and seller must match the page, which catches figures edited after the e-invoice was issued.
+   - **Reverse charge** (e.g. GTA freight): no GST on the invoice is correct; the agent states the GST we must pay ourselves.
    - **TDS** under s.393(1) of the Income-tax Act 2025: contractors 1%/2% by PAN type above ₹30k / ₹1 lakh, technical services 2% above ₹50k, on the pre-GST value.
    - **MSME 45-day** payment cap.
    - **GSTR-2B** input-tax-credit status.
@@ -187,7 +190,7 @@ The demo's vendors and POs are fictional, so an invoice from your own supplier s
 # Python 3.11+, Tesseract (Windows: winget install UB-Mannheim.TesseractOCR | macOS: brew install tesseract tesseract-lang)
 pip install -r requirements.txt
 uvicorn app.main:app --reload             # http://localhost:8000
-STAGE_DELAY=0 python -m pytest -q         # 222 tests
+STAGE_DELAY=0 python -m pytest -q         # 274 tests
 python scripts/evaluate.py                # accuracy report -> docs/EVALUATION.md + dashboard
 python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVAL.md
 ```

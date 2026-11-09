@@ -10,7 +10,7 @@
 | Missed approvals | 5 of 10 | good invoices sent to a person anyway |
 | Arithmetic check | catches **100.0%** of single-digit errors above ₹1 (125 injected) | errors of ₹1 or less sit inside the round-off tolerance by design |
 | Scans | 0 of 5 approved, 1 after an OCR repair | |
-| Speed | 0.49 s per invoice | |
+| Speed | 0.58 s per invoice | |
 
 ## By situation
 

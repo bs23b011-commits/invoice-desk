@@ -57,10 +57,16 @@ ACTIONS = {
                     "or 'reject'."),
     "PO_BALANCE": ("internal:Procurement (PO owner)", "Over-billing on {po}: approve or ask for a credit note?",
                    "{vendor} invoice {inv} is above what is left on {po}. {question} Reply 'approve' or 'reject'."),
+    "WORDS_MISMATCH": ("vendor", "Amount on invoice {inv} doesn't agree",
+                       "On invoice {inv} the amount in words and the amount in figures ({total}) are different. Please "
+                       "send a corrected invoice; we can't pay until both agree."),
+    "GST_RATE": ("vendor", "GST rate on invoice {inv}",
+                 "Invoice {inv} charges GST at a rate that doesn't apply to these items under the current GST slabs "
+                 "(GST 2.0, effective 22 Sep 2025). Please check the HSN rate and send a corrected invoice."),
     "PO_PRICE": ("internal:Procurement (PO owner)", "Price above PO on {po}",
                  "{vendor} invoice {inv}: {question} Reply 'approve' (rate agreed) or 'reject' (we will ask for a credit note)."),
 }
-NEVER_CONTACT_VENDOR = {"BANK_CHANGE", "IMPERSONATION", "FRAUD_HIGH"}
+NEVER_CONTACT_VENDOR = {"BANK_CHANGE", "IMPERSONATION", "FRAUD_HIGH", "HIDDEN_TEXT"}
 
 
 # ------------------------------------------------------------------------------------------------ outbound

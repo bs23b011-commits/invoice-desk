@@ -7,7 +7,11 @@ TOLERANCE_PCT = 1.0          # % of the expected (PO-priced) amount
 TOLERANCE_ABS = 5000.00      # rupees
 
 ROUNDING = 1.00              # rupees allowed for rounding when checking the invoice's own arithmetic
-GST_RATES = {0, 0.25, 3, 5, 12, 18, 28, 40}
+# GST 2.0 (from 22 Sep 2025): 5% and 18% for almost everything, 40% for luxury/sin goods; 28% stays only for
+# tobacco until compensation cess ends; 0.25 / 1.5 / 3 for stones and metals, 0.1 for merchant exports.
+GST2_START = date(2025, 9, 22)
+GST_RATES = {0, 0.1, 0.25, 1, 1.5, 3, 5, 18, 28, 40}
+GST_RATES_BEFORE_2025_09_22 = {0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28}
 MAX_INVOICE_AGE_DAYS = 180   # older invoices go to review (possible stale / re-used document)
 
 MIN_FIELD_CONFIDENCE = 0.60  # below this, a key field is treated as unreliable -> review

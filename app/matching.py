@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from difflib import SequenceMatcher
 
 from .config import (LINE_MATCH_MIN, MAX_INVOICE_AGE_DAYS, PO_INFER_MIN, TOLERANCE_ABS, TOLERANCE_PCT, today)
+from .sense import pack_size
 from .utils import STATE_CODES, fmt_inr, gstin_is_valid, norm_invoice_no, similarity, token_overlap
 
 
@@ -30,8 +31,22 @@ def match_vendor(inv: dict, vendors: list[dict], buyer: dict, source: str = "tex
     best = max(vendors, key=lambda v: max([similarity(name, v["name"])] + [similarity(name, a) for a in v["aliases"]]))
     best_sim = max([similarity(name, best["name"])] + [similarity(name, a) for a in best["aliases"]])
     if g:
-        vendor = next((v for v in vendors if v["gstin"] == g), None)
+        vendor = next((v for v in vendors if v["gstin"] == g or g in (v.get("other_gstins") or [])), None)
         method = "GSTIN exact match" if vendor else None
+        branch = None
+        if not vendor and gstin_is_valid(g):
+            # same PAN (characters 3-12), other state: the vendor's registration in another state, not another firm
+            branch = next((v for v in vendors if v["gstin"][2:12] == g[2:12] and v["gstin"][:2] != g[:2]), None)
+        if branch:
+            vendor, method = branch, "same PAN, other-state GSTIN"
+            st = STATE_CODES.get(g[:2], g[:2])
+            findings.append(F("warn", f"GSTIN {g} is {branch['name']}'s registration in {st}: same PAN "
+                                      f"({g[2:12]}) as the GSTIN on file ({branch['gstin']}, "
+                                      f"{STATE_CODES.get(branch['gstin'][:2], branch['gstin'][:2])}), but this one isn't in "
+                                      "our vendor master. Usually a branch billing from another state - confirm with them "
+                                      "on the number on file and add it before paying",
+                              code="GSTIN_BRANCH", facts=dict(gstin=g, vendor=branch["name"], state=st),
+                              tried=["Compared the PAN inside the GSTIN with every vendor on file"]))
         if not vendor and source == "ocr" and best_sim >= 0.85 and _hamming(g, best["gstin"]) <= 3:
             vendor, method = best, "GSTIN OCR-near match + name"
             findings.append(F("info", f"OCR read the GSTIN as {g}; it differs from the GSTIN on file for {best['name']} "
@@ -42,7 +57,7 @@ def match_vendor(inv: dict, vendors: list[dict], buyer: dict, source: str = "tex
             findings.append(F("warn", f"Vendor GSTIN {g} fails the GSTIN checksum - likely mistyped or fake",
                               code="GSTIN_INVALID", tried=["Validated the GSTIN checksum"]))
 
-    if vendor and method and "near" in method:
+    if vendor and method and ("near" in method or "PAN" in method):
         findings.append(F("pass", f"Matched {vendor['id']} · {vendor['name']}"))
     elif vendor:
         name_sim = max([similarity(name, vendor["name"])] + [similarity(name, a) for a in vendor["aliases"]])
@@ -74,8 +89,20 @@ def match_vendor(inv: dict, vendors: list[dict], buyer: dict, source: str = "tex
     if inv.get("buyer_gstin") == buyer["gstin"]:
         findings.append(F("pass", f"Billed to our GSTIN {buyer['gstin']}"))
     else:
-        findings.append(F("warn", "Our GSTIN is missing or wrong on the invoice - input tax credit can't be claimed",
-                          code="BUYER_GSTIN"))
+        ours = buyer["gstin"]
+        others = [x for x in [inv.get("buyer_gstin")] + list(inv.get("gstins") or [])
+                  if x and x != inv.get("vendor_gstin") and x != ours]
+        mine = next((x for x in others if x[2:12] == ours[2:12]), None)
+        if mine:
+            msg = (f"Billed to our {STATE_CODES.get(mine[:2], mine[:2])} registration {mine}, not to "
+                   f"{ours} ({STATE_CODES.get(ours[:2], ours[:2])}) where this purchase is received and booked. The "
+                   "input tax credit would land on the wrong registration - ask the vendor to re-issue it to " + ours)
+        elif others:
+            msg = (f"Billed to another company's GSTIN {others[0]}, not ours ({ours}). Either it reached us by mistake "
+                   "or the vendor put the wrong customer on it - we can't book it or claim its tax credit")
+        else:
+            msg = f"Our GSTIN ({ours}) isn't printed on the invoice - input tax credit can't be claimed without it"
+        findings.append(F("warn", msg, code="BUYER_GSTIN", facts=dict(gstin=others[0] if others else None)))
     vstate = (g or vendor["gstin"])[:2]
     intra = vstate == buyer["gstin"][:2]
     types = {t["type"] for t in inv["taxes"]}
@@ -221,6 +248,17 @@ def match_po(inv: dict, vendor: dict | None, pos: list[dict], ledger: list[dict]
                               facts=dict(item=l["description"])))
             continue
         pl = po["lines"][k]
+        pack = pack_size(l["description"])
+        uom = None
+        if (pack and pl["unit_price"] and l.get("unit_price") and not pack_size(pl["description"])
+                and abs(l["unit_price"] / pl["unit_price"] - pack) <= 0.1 * pack):
+            # the PO prices one piece, the vendor billed packs of `pack`: compare like with like
+            uom = (f"billed in packs of {pack}: {l['qty']:g} × {pack} = {l['qty'] * pack:g} at "
+                   f"{fmt_inr(l['unit_price'] / pack)} each")
+            l.update(billed_as=dict(qty=l["qty"], unit_price=l["unit_price"], pack=pack),
+                     qty=round(l["qty"] * pack, 4), unit_price=round(l["unit_price"] / pack, 4))
+            findings.append(F("info", f"{l['description']}: {uom} - converted to the PO's unit before comparing",
+                              code="UNIT_CONVERTED"))
         qty_left = pl["qty"] - used_qty[k]
         price_var = (l["unit_price"] - pl["unit_price"]) / pl["unit_price"] * 100 if pl["unit_price"] else 0
         expected += l["qty"] * pl["unit_price"]

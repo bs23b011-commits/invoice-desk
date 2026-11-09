@@ -67,11 +67,14 @@ class Document:
     has_hindi: bool = False
     ocr_lang: str = ""
     pages_read: int = 1
+    hidden_text: str = ""        # text in the PDF a person can't see (white or microscopic): never read as data
+    ocr_reason: str = ""         # why the page was OCR'd although it had a text layer
+    rotated: int = 0             # degrees the scan was turned to read it (90/180/270), 0 if upright
 
     def box(self, words) -> list | None:
         """Bounding box of some words as fractions of the page, for highlighting on the preview."""
         words = [w for w in words if w is not None and w.page == 0]  # only page 1 is shown for highlighting
-        if not words:
+        if not words or self.rotated:  # a turned scan: OCR boxes don't sit on the preview, so don't draw wrong ones
             return None
         bs = [w.page_box or (w.x0, w.top, w.x1, w.bottom) for w in words]
         x0, y0 = min(b[0] for b in bs), min(b[1] for b in bs)
@@ -120,19 +123,78 @@ def inspect(pdf_bytes: bytes) -> dict:
                 has_text=chars >= 40, preview_png=buf.getvalue())
 
 
+def _is_white(c) -> bool:
+    col = c.get("non_stroking_color")
+    if col is None:
+        return False
+    if not isinstance(col, (tuple, list)):
+        col = (col,)
+    try:
+        v = [float(x) for x in col]
+    except (TypeError, ValueError):
+        return False
+    if len(v) == 1:
+        return v[0] >= 0.97
+    if len(v) == 3:
+        return min(v) >= 0.97
+    if len(v) == 4:  # CMYK
+        return max(v) <= 0.03
+    return False
+
+
+def _visible(page, pdf_bytes: bytes, index: int):
+    """Drop characters a person reading the paper can't see: microscopic (< 2 pt), or white ink on white paper.
+    White text on a dark letterhead band is visible, so the rendered page behind each white character is checked."""
+    tiny = lambda c: float(c.get("size") or 0) < 2.0
+    whites = [c for c in page.chars if _is_white(c) and not tiny(c)]
+    hidden_ids = {id(c) for c in page.chars if tiny(c)}
+    if whites:
+        try:
+            import numpy as np
+            img = np.asarray(pdfium.PdfDocument(pdf_bytes)[index].render(scale=1).to_pil().convert("L"))
+            h, w = img.shape
+            for c in whites:
+                x0, x1 = max(0, int(c["x0"]) - 1), min(w, int(c["x1"]) + 1)
+                y0, y1 = max(0, int(c["top"]) - 1), min(h, int(c["bottom"]) + 1)
+                patch = img[y0:y1, x0:x1]
+                if patch.size == 0 or float(patch.mean()) > 235:  # nothing dark behind it: invisible on paper
+                    hidden_ids.add(id(c))
+        except Exception:
+            pass
+    if not hidden_ids:
+        return page, ""
+    hidden = [c for c in page.chars if id(c) in hidden_ids]
+    keep = lambda o: not (o.get("object_type") == "char" and any(
+        o["x0"] == c["x0"] and o["top"] == c["top"] and o["text"] == c["text"] for c in hidden))
+    return page.filter(keep), "".join(c["text"] for c in hidden)
+
+
+def text_quality(words: list[str]) -> float:
+    """Share of words that look like real text (3+ letters, or a number). A scanner's broken OCR layer or a PDF
+    with a broken font gives strings like '¤;¬1al!¬~' - those score near 0."""
+    if not words:
+        return 0.0
+    real = sum(1 for w in words if re.fullmatch(r"[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F.,:'&()/-]{2,}|"
+                                                 r"[(₹Rs.]*\d[\d,./:\-]*\)?%?|[A-Z]{2,}[\w/\-]*\d[\w/\-]*", w))
+    return real / len(words)
+
+
 def read_pdf(pdf_bytes: bytes, force_ocr: bool = False, preview: bool = True) -> Document:
     sha = hashlib.sha256(pdf_bytes).hexdigest()
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         n_pages = len(pdf.pages)
-        page = pdf.pages[0]
+        page, hidden = _visible(pdf.pages[0], pdf_bytes, 0)
         raw = page.extract_words(keep_blank_chars=False, use_text_flow=False, x_tolerance=1.5)
         chars = len(page.chars)
+        junk = chars >= 40 and text_quality([w["text"] for w in raw]) < 0.45
         pw, ph = float(page.width), float(page.height)
         more = []  # digital multi-page invoices: line items and totals often continue on page 2+
         for i, pg in enumerate(pdf.pages[1:MAX_PAGES], start=1):
             if len(pg.chars) < 40:
                 break  # a scanned later page: not read (flagged by the pipeline)
             off = sum(float(x.height) for x in pdf.pages[:i])
+            pg, h2 = _visible(pg, pdf_bytes, i)
+            hidden += h2
             more += [Word(w["text"], w["x0"], w["x1"], w["top"] + off, w["bottom"] + off, page=i)
                      for w in pg.extract_words(keep_blank_chars=False, use_text_flow=False, x_tolerance=1.5)]
 
@@ -140,7 +202,7 @@ def read_pdf(pdf_bytes: bytes, force_ocr: bool = False, preview: bool = True) ->
     if preview:
         _render(pdf_bytes, 1.6).convert("RGB").save(buf, "PNG", optimize=True)
 
-    if chars >= 40 and not force_ocr:
+    if chars >= 40 and not force_ocr and not junk:
         words = [Word(w["text"], w["x0"], w["x1"], w["top"], w["bottom"]) for w in raw] + more
         doc = Document("text-layer", n_pages, words, sha256=sha, preview_png=buf.getvalue(), char_count=chars)
         doc.pages_read = 1 + len({w.page for w in more})
@@ -148,6 +210,9 @@ def read_pdf(pdf_bytes: bytes, force_ocr: bool = False, preview: bool = True) ->
         doc = _ocr(pdf_bytes, n_pages, sha)
         doc.preview_png = buf.getvalue()
         doc.char_count = chars
+        if junk:
+            doc.ocr_reason = "its text layer is gibberish (a scanner's failed OCR or a broken font), so the page image was read instead"
+    doc.hidden_text = re.sub(r"\s+", " ", hidden).strip()
     doc.page_w, doc.page_h = pw, ph
     doc.lines = group_lines(doc.words)
     return doc
@@ -213,6 +278,9 @@ def _ocr(pdf_bytes: bytes, n_pages: int, sha: str) -> Document:
     from PIL import Image, ImageOps
 
     img = _render(pdf_bytes, OCR_SCALE).convert("L")
+    turned = orientation(img)
+    if turned:
+        img = img.rotate(-turned, expand=True, fillcolor=255)  # Tesseract says how far to turn it clockwise
     skew = estimate_skew(img)
     to_page = None
     if abs(skew) >= 0.2:
@@ -251,4 +319,21 @@ def _ocr(pdf_bytes: bytes, n_pages: int, sha: str) -> Document:
     doc = Document("ocr", n_pages, words, sha256=sha, ocr_confidence=mean)
     doc.skew_deg = skew
     doc.ocr_lang = lang
+    doc.rotated = turned
     return doc
+
+
+def orientation(img) -> int:
+    """0/90/180/270: how far a scan must be turned clockwise to be upright. Scanners are fed sideways and
+    upside down all the time. Uses Tesseract's orientation detector; only trusted when it is confident."""
+    import pytesseract
+    try:
+        osd = pytesseract.image_to_osd(img, config="--psm 0")
+    except Exception:
+        return 0
+    m = re.search(r"Rotate:\s*(\d+)", osd)
+    c = re.search(r"Orientation confidence:\s*([\d.]+)", osd)
+    if not m or not c:
+        return 0
+    rot, conf = int(m.group(1)) % 360, float(c.group(1))
+    return rot if rot and conf >= 2.0 else 0

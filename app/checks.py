@@ -12,7 +12,10 @@ a failed identity there is the vendor's mistake, not ours.
 from __future__ import annotations
 
 import copy
-from .config import GST_RATES, ROUNDING
+from datetime import date
+from itertools import combinations
+
+from .config import GST_RATES, GST_RATES_BEFORE_2025_09_22, GST2_START, ROUNDING
 from .utils import fmt_inr
 
 OCR_CONFUSIONS = {
@@ -25,15 +28,45 @@ def _close(a, b, tol=ROUNDING):
     return a is not None and b is not None and abs(a - b) <= tol
 
 
+def _adj(inv: dict, after: bool) -> float:
+    return round(sum(a["amount"] or 0 for a in inv.get("adjustments") or [] if bool(a.get("after_subtotal")) == after), 2)
+
+
 def effective_subtotal(inv: dict):
-    """Pre-tax amount. For tax-inclusive invoices it is derived: total - tax."""
+    """Pre-tax (taxable) amount. For tax-inclusive invoices it is derived: total - tax. Discounts or freight
+    printed between the subtotal and the tax lines change the taxable value."""
     tax = sum(t["amount"] or 0 for t in inv["taxes"])
     if inv.get("tax_inclusive"):
         return round(inv["total"] - tax, 2) if inv.get("total") is not None else None
     if inv.get("subtotal") is not None:
-        return inv["subtotal"]
+        return round(inv["subtotal"] + _adj(inv, True), 2)
     if inv["lines"]:
-        return round(sum(l["amount"] or 0 for l in inv["lines"]), 2)
+        return round(sum(l["amount"] or 0 for l in inv["lines"]) + _adj(inv, False) + _adj(inv, True), 2)
+    return None
+
+
+def _full_rate(t: dict) -> float:
+    return t["rate"] * (2 if t["type"] in ("CGST", "SGST", "UTGST") else 1)
+
+
+def rate_groups(inv: dict) -> dict:
+    """{full GST rate: [tax indexes]} - one invoice can carry goods at 18% and others at 5%."""
+    g: dict = {}
+    for j, t in enumerate(inv["taxes"]):
+        if t.get("rate") is not None:
+            g.setdefault(_full_rate(t), []).append(j)
+    return g
+
+
+def _subset_sum(amounts: list[float], target: float, tol: float = ROUNDING):
+    """Indexes of lines that add up to target (small invoices only: up to 16 lines)."""
+    n = len(amounts)
+    if n > 16:
+        return None
+    for k in range(1, n + 1):
+        for idx in combinations(range(n), k):
+            if abs(sum(amounts[i] for i in idx) - target) <= tol:
+                return list(idx)
     return None
 
 
@@ -51,24 +84,59 @@ def identities(inv: dict) -> list[dict]:
                         cells=[("lines", i, "qty"), ("lines", i, "unit_price"), ("lines", i, "amount")]))
 
     if lines:
-        s = round(sum(l["amount"] or 0 for l in lines), 2)
+        s = round(sum(l["amount"] or 0 for l in lines) + _adj(inv, False), 2)
+        adj_cells = [("adjustments", k, "amount") for k, a in enumerate(inv.get("adjustments") or [])
+                     if not a.get("after_subtotal")]
         if inclusive:
             out.append(dict(id="lines_total", label="Lines add up to the (tax-inclusive) total",
                             expected=s, found=total, ok=_close(s, total),
                             cells=[("lines", i, "amount") for i in range(len(lines))] + [("total",)]))
         elif inv.get("subtotal") is not None:
-            out.append(dict(id="lines_subtotal", label="Lines add up to the subtotal",
+            out.append(dict(id="lines_subtotal", label="Lines add up to the subtotal" + (
+                                " (after the discount / charges printed below them)" if adj_cells else ""),
                             expected=s, found=inv["subtotal"], ok=_close(s, inv["subtotal"]),
-                            cells=[("lines", i, "amount") for i in range(len(lines))] + [("subtotal",)]))
+                            cells=[("lines", i, "amount") for i in range(len(lines))] + adj_cells + [("subtotal",)]))
 
     tax_sum = round(sum(t["amount"] or 0 for t in taxes), 2)
     if not inclusive and inv.get("subtotal") is not None and total is not None:
-        calc = round(inv["subtotal"] + tax_sum, 2)
+        calc = round(inv["subtotal"] + _adj(inv, True) + tax_sum, 2)
         out.append(dict(id="total", label="Subtotal + tax = total", expected=calc, found=total,
                         ok=_close(calc, total),
                         cells=[("subtotal",)] + [("taxes", j, "amount") for j in range(len(taxes))] + [("total",)]))
 
     base = effective_subtotal(inv)
+    groups = rate_groups(inv)
+    if len(groups) > 1 and base is not None and not inclusive:
+        # several GST rates on one invoice: the taxable value splits into one part per rate, and each part must
+        # be made of whole lines
+        parts, used = {}, set()
+        amounts = [l["amount"] or 0 for l in lines]
+        for r, js in sorted(groups.items(), key=lambda kv: -kv[0]):
+            pair = [taxes[j] for j in js]
+            share = sum(t["amount"] or 0 for t in pair)
+            parts[r] = round(share * 100 / r, 2) if r else 0.0
+        out.append(dict(id="rate_split", label="Taxable value splits by GST rate: " + " + ".join(
+                            f"{fmt_inr(v)} at {r:g}%" for r, v in parts.items()),
+                        expected=base, found=round(sum(parts.values()), 2),
+                        ok=abs(sum(parts.values()) - base) <= ROUNDING * len(parts) + 0.5,
+                        cells=[("taxes", j, "amount") for j in range(len(taxes))] + [("subtotal",)]))
+        for r, v in parts.items():
+            free = [i for i in range(len(amounts)) if i not in used]
+            pick = _subset_sum([amounts[i] for i in free], v, ROUNDING * 2)
+            if pick is not None:
+                used.update(free[i] for i in pick)
+            out.append(dict(id=f"rate{r:g}", label=f"Lines taxed at {r:g}% add up to {fmt_inr(v)}",
+                            expected=v, found=round(sum(amounts[free[i]] for i in pick), 2) if pick else None,
+                            ok=pick is not None or not lines,
+                            cells=[("taxes", j, "amount") for j in groups[r]]))
+            js = groups[r]
+            ts = [taxes[j] for j in js]
+            if len(ts) == 2 and {t["type"] for t in ts} >= {"CGST", "SGST"}:
+                out.append(dict(id=f"cgst_sgst{r:g}", label=f"CGST = SGST at {r:g}%", expected=ts[0]["amount"],
+                                found=ts[1]["amount"], ok=_close(ts[0]["amount"], ts[1]["amount"]),
+                                cells=[("taxes", js[0], "amount"), ("taxes", js[1], "amount")]))
+        return out
+
     for j, t in enumerate(taxes):
         if t.get("rate") is None or base is None:
             continue
@@ -91,12 +159,28 @@ def identities(inv: dict) -> list[dict]:
 
 
 def rate_findings(inv: dict) -> list[dict]:
-    out = []
+    """GST slabs changed on 22 Sep 2025 (GST 2.0): 12% and 28% were folded into 5%, 18% and 40% for almost
+    everything. Vendors whose billing software wasn't updated still print 12%."""
+    out, seen = [], set()
+    try:
+        d = date.fromisoformat(inv.get("invoice_date")) if inv.get("invoice_date") else None
+    except ValueError:
+        d = None
+    new_regime = d is None or d >= GST2_START
+    valid = GST_RATES if new_regime else GST_RATES_BEFORE_2025_09_22
     for t in inv["taxes"]:
         if t.get("rate") is None:
             continue
-        r = t["rate"] * (2 if t["type"] in ("CGST", "SGST") else 1)
-        if r not in GST_RATES:
+        r = _full_rate(t)
+        if r in seen or r in valid:
+            continue
+        seen.add(r)
+        if new_regime and r in GST_RATES_BEFORE_2025_09_22:
+            out.append(dict(status="warn", text=f"GST charged at {r:g}% ({t['type']} {t['rate']:g}%): the {r:g}% slab "
+                                                f"was removed on 22 Sep 2025 (GST 2.0) - most such goods are now 5% or "
+                                                f"18%. The vendor's billing may still use the old rate; check the HSN "
+                                                f"rate and ask for a corrected invoice"))
+        else:
             out.append(dict(status="warn", text=f"{t['type']} rate {t['rate']:g}% is not a valid GST slab"))
     return out
 
@@ -184,4 +268,6 @@ def _cell_name(cell, inv):
         return f"Line {cell[1] + 1} {names[cell[2]]}"
     if cell[0] == "taxes":
         return inv["taxes"][cell[1]]["type"]
+    if cell[0] == "adjustments":
+        return inv["adjustments"][cell[1]]["label"] or "Adjustment"
     return {"subtotal": "Subtotal", "total": "Total"}[cell[0]]

@@ -37,6 +37,7 @@ function waitingOn(x) {
     && x.thread.some((m) => m.direction === "out");
 }
 function cat(x) {
+  if (x.not_bill) return "you";
   if (x.recommendation === "REJECT" || x.recommendation === "UNREADABLE") return "stop";
   return waitingOn(x) ? "waiting" : "you";
 }
@@ -44,12 +45,14 @@ function statusLine(x) {
   if (x.recommendation === "UNREADABLE") return "Can't read this file. Ask the sender for a readable copy";
   if (x.recommendation === "REJECT") return "Don't pay. " + firstSentence(x.note);
   if (x.recommendation === "APPROVE") return `Ready: every check passed${x.due ? ` · pays ${x.due}` : ""}`;
-  if (x.needs_phone_check) return "New bank account on the invoice. Call them on the number on file first";
+  if (x.not_bill) return `Not a bill (${x.kind}). Nothing to pay`;
+  if (x.needs_phone_check) return x.phone_reason || "Verify the vendor by phone first";
   if (waitingOn(x)) return `Waiting for ${shortName(x.owner.name)}: ${firstSentence(x.owner.question || x.note)}`;
-  return firstSentence(x.note);
+  return x.owner && x.owner.question ? x.owner.question : firstSentence(x.note);
 }
 const PILL = { you: ["Needs you", "review"], waiting: ["Waiting", "info"], stop: ["Don't pay", "reject"] };
 function pill(x) {
+  if (x.not_bill) return ["Not a bill", "info"];
   if (x.recommendation === "APPROVE") return ["Ready", "approve"];
   if (x.recommendation === "UNREADABLE") return ["Can't read", "reject"];
   return PILL[cat(x)];
@@ -64,10 +67,12 @@ function steps(x) {
   const checked = { label: "Checked", tone: ok, sub: `${x.stages_done || 11} checks` };
   let third;
   if (x.recommendation === "APPROVE") third = { label: x.thread.some((m) => m.direction === "in") ? "Questions answered" : "All checks passed", tone: ok };
+  else if (x.not_bill) third = { label: "Not a bill", tone: warn, sub: x.kind };
   else if (x.recommendation === "REJECT") third = { label: "Problem found", tone: bad };
   else if (waitingOn(x)) third = { label: `Waiting for ${shortName(x.owner.name)}`, tone: warn, sub: x.owner.due ? "reply by " + dueTxt(x.owner.due) : "" };
   else third = { label: "Needs a look", tone: warn };
-  return [got, checked, third, { label: "You decide", tone: waitingOn(x) ? todo : now }, { label: "Paid", tone: todo, sub: x.due || "" }];
+  return [got, checked, third, { label: "You decide", tone: waitingOn(x) ? todo : now },
+          x.not_bill ? { label: "Dismissed", tone: todo, sub: "nothing to pay" } : { label: "Paid", tone: todo, sub: x.due || "" }];
 }
 const dTimeShort = (iso) => { try { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" }); } catch (_) { return ""; } };
 function tracker(x) {
@@ -76,7 +81,7 @@ function tracker(x) {
 }
 const AGENT_SAYS = { APPROVE: ["approve.", "approve"], REVIEW: ["wait.", "review"], REJECT: ["don't pay.", "reject"], UNREADABLE: ["get a readable copy.", "reject"] };
 function agentSays(x) {
-  const [w, tone] = AGENT_SAYS[x.recommendation];
+  const [w, tone] = x.not_bill ? ["nothing to pay.", "review"] : AGENT_SAYS[x.recommendation];
   return `<div class="c-says t-${tone}"><b>Agent says: ${w}</b> ${esc(x.note)}</div>`;
 }
 
@@ -101,7 +106,7 @@ function renderList() {
   const f = W.filter || "all";
   const rank = (x) => (x.recommendation === "APPROVE" ? 0 : cat(x) === "you" ? 1 : cat(x) === "stop" ? 2 : 3);
   const items = W.items.filter((x) => f === "all" || cat(x) === f).sort((a, b) => rank(a) - rank(b));
-  const total = W.items.reduce((a, i) => a + (i.total || 0), 0);
+  const total = W.items.reduce((a, i) => a + (i.not_bill ? 0 : i.total || 0), 0);  // a credit note isn't owed
   $("#w-count").textContent = W.items.length
     ? `${W.items.length} invoice${W.items.length > 1 ? "s" : ""} waiting for a decision · ${shortInr(total)}`
     : "Nothing needs you right now";
@@ -207,7 +212,7 @@ function renderDetail() {
       <div class="c-row-top">
         <div><div class="c-vendor big">${esc(vname(x))}</div>
           <div class="muted">${esc(x.invoice_number || "no number")}${x.match.po_number ? " · " + esc(x.match.po_number) : ""} · arrived by ${esc(x.channel)}${x.created ? ", " + dTimeShort(x.created) : ""}${x.batch ? ` · invoice ${x.batch.index} of ${x.batch.count} in ${esc(x.batch.source)}` : ""}</div></div>
-        <div class="c-amount-wrap"><div class="c-amount big">${shortInr(x.total)}</div><div class="muted small">due ${esc(x.due || "—")}${x.msme ? " · MSME" : ""}</div></div>
+        <div class="c-amount-wrap"><div class="c-amount big">${shortInr(x.total)}</div><div class="muted small">${x.not_bill ? esc(x.kind) : `due ${esc(x.due || "—")}${x.msme ? " · MSME" : ""}`}</div></div>
       </div>
       ${tracker(x)}
       ${agentSays(x)}
@@ -216,13 +221,13 @@ function renderDetail() {
     <section class="c-card"><h2 class="c-h">The checks</h2>${checkChips(x)}</section>
     ${x.onboard ? onboardHtml(x.onboard) : ""}
     <section class="c-card c-decide">
-      <div class="c-impact"><span class="muted">If you approve:</span> ${esc(x.impact)}</div>
+      <div class="c-impact"><span class="muted">${x.not_bill ? "What happens:" : "If you approve:"}</span> ${esc(x.impact)}</div>
       <label class="w-note">${x.recommendation === "REJECT" ? "Why approve anyway? (required)" : "Your note (optional, saved in the audit trail)"}
         <input type="text" id="w-note" placeholder="${x.recommendation === "REJECT" ? "At least 10 characters" : "e.g. checked with Ravi in Stores"}"></label>
       ${x.needs_phone_check ? `<label class="w-verify"><input type="checkbox" id="w-verified"> I called the vendor on the number already in the vendor master (not the one on the invoice)</label>` : ""}
       <div class="c-btns">
-        <button type="button" class="c-btn ${x.recommendation === "APPROVE" ? "approve" : "ghost-approve"} w-btn" data-act="approve">${x.recommendation === "APPROVE" ? "Approve payment" : "Approve anyway"}</button>
-        <button type="button" class="c-btn ghost-reject w-btn" data-act="reject">${x.recommendation === "REJECT" ? "Confirm: don't pay" : "Reject"}</button>
+        ${x.not_bill ? "" : `<button type="button" class="c-btn ${x.recommendation === "APPROVE" ? "approve" : "ghost-approve"} w-btn" data-act="approve">${x.recommendation === "APPROVE" ? "Approve payment" : "Approve anyway"}</button>`}
+        <button type="button" class="c-btn ${x.not_bill ? "primary" : "ghost-reject"} w-btn" data-act="reject">${x.not_bill ? "Dismiss: nothing to pay" : x.recommendation === "REJECT" ? "Confirm: don't pay" : "Reject"}</button>
         <button type="button" class="c-btn ghost" id="w-open">See every check</button>
         <label class="w-who">Deciding as <input type="text" id="w-who" value="${esc(localGet("who") || "AP manager")}" aria-label="Your name"></label>
       </div>

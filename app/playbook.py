@@ -63,8 +63,11 @@ PLAYBOOK = {
                           q=lambda f, c: "Ask the vendor to reissue the invoice with their GSTIN?"),
     "NAME_MISMATCH": dict(category="Vendor name mismatch", owner=VMT, sla_h=48, escalate=CTRL,
                           q=lambda f, c: "Has the vendor changed its legal name? Update the master or reject."),
-    "BUYER_GSTIN": dict(category="Our GSTIN missing", owner=TAX, sla_h=72, escalate=CTRL,
+    "BUYER_GSTIN": dict(category="Not billed to our GSTIN", owner=TAX, sla_h=72, escalate=CTRL,
                         q=lambda f, c: "Ask the vendor to reissue with our GSTIN so input tax credit can be claimed?"),
+    "GSTIN_BRANCH": dict(category="Vendor's other-state GSTIN", owner=VMT, sla_h=48, escalate=CTRL,
+                         q=lambda f, c: f"Is {_f(f, 'gstin')} {_f(f, 'vendor')}'s registration in {_f(f, 'state')}? "
+                                        "Confirm on the number on file and add it to the vendor master."),
     "TAX_TYPE": dict(category="Wrong tax type", owner=TAX, sla_h=72, escalate=CTRL,
                      q=lambda f, c: "Ask the vendor to reissue with the correct GST type (IGST vs CGST+SGST)?"),
     "IRN_MISSING": dict(category="No e-invoice (IRN)", owner=TAX, sla_h=72, escalate=CTRL,
@@ -107,6 +110,28 @@ PLAYBOOK = {
                          q=lambda f, c: "Send the drafted note asking the vendor for a corrected invoice?"),
     "NO_ARITH": dict(category="Numbers can't be cross-checked", owner=AP, sla_h=24, escalate=CTRL,
                      q=lambda f, c: "Please confirm the line items and total against the paper."),
+    # ---- what kind of document / what is actually payable ----------------------------------------
+    "NOT_INVOICE": dict(category="Not a bill to pay", owner=AP, sla_h=24, escalate=CTRL,
+                        q=lambda f, c: {"credit_note": f"Apply this credit of {_f(f, 'amount')} against "
+                                                       f"{_f(f, 'against', 'the original invoice')} on the next payment "
+                                                       "to this vendor?",
+                                        "proforma": "Is an advance against this proforma approved? If not, wait for the "
+                                                    "tax invoice.",
+                                        "statement": "Check each invoice on this statement is already on file; "
+                                                     "nothing is paid from the statement itself. Dismiss?",
+                                        }.get(_f(f, 'kind'), "Nothing to pay on this document. Dismiss it, or forward it "
+                                                             "to whoever it is meant for?")),
+    "ADVANCE_ADJUSTED": dict(category="Advance already paid", owner=AP, sla_h=24, escalate=CTRL,
+                             q=lambda f, c: f"Did we pay {_f(f, 'vendor')} an advance of {_f(f, 'advance')}? If yes, "
+                                            f"pay only the balance of {_f(f, 'balance')}."),
+    "WORDS_MISMATCH": dict(category="Words and figures disagree", owner=AP, sla_h=24, escalate=CTRL,
+                           q=lambda f, c: f"The figures say {_f(f, 'figures')} but the words say {_f(f, 'words')}. "
+                                          "Which is right? Ask the vendor for a corrected invoice."),
+    "HIDDEN_TEXT": dict(category="Hidden text in the PDF", owner=CTRL, sla_h=24, escalate="CFO",
+                        q=lambda f, c: "The PDF carries invisible text. Was this invoice tampered with? Confirm it "
+                                       "with the vendor on the number on file before paying."),
+    "ZERO_VALUE": dict(category="Nothing to pay", owner=AP, sla_h=48, escalate=CTRL,
+                       q=lambda f, c: "A zero-value invoice (free replacement or sample). File it and close?"),
     # ---- dates -------------------------------------------------------------------------------------
     "DATE_ISSUE": dict(category="Date problem", owner=AP, sla_h=48, escalate=CTRL,
                        q=lambda f, c: "Is the invoice date correct? Ask the vendor to reissue if not."),

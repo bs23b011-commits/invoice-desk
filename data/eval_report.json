@@ -1,5 +1,5 @@
 {
-  "generated": "2026-11-07",
+  "generated": "2026-11-09",
   "invoices": 50,
   "per_type": 5,
   "seed": 7,
@@ -139,8 +139,8 @@
     "repaired": 1,
     "approved": 0
   },
-  "avg_seconds": 0.49,
-  "total_seconds": 26.5,
+  "avg_seconds": 0.58,
+  "total_seconds": 30.7,
   "wrong": [],
   "held": [
     {
@@ -161,7 +161,7 @@
     {
       "id": "009_scan",
       "got": "REVIEW",
-      "why": "Needs review: Missing information (+1 more). Could not find invoice number on the invoice"
+      "why": "Needs review: Missing information (+2 more). Could not find invoice number on the invoice"
     },
     {
       "id": "010_scan",
