@@ -1,19 +1,50 @@
----
-title: Invoice Desk
-emoji: 🧾
-colorFrom: indigo
-colorTo: green
-sdk: docker
-app_port: 7860
-pinned: false
-short_description: AP agent - reads, checks and recommends; a person approves
----
+# Invoice Desk: an accounts-payable AI agent
 
-# Invoice Desk: an accounts-payable digital employee
+**Zamp AI Solutions Analyst case study, problem 1 (Finance / accounts payable)**
 
-Zamp AI Solutions Analyst case study, **PS-1 (Finance / AP)**.
+Built by **Naveen Prakash Junodiya**, BS student at IIT Madras (roll no. BS23B011)
 
-An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves the numbers, checks it against the vendor master, earlier invoices, the purchase order, goods receipts, fraud signals and Indian tax rules, and **recommends** a decision with its reasons. When something is wrong, it asks the right person **one specific question**, reads their reply and re-checks. **A person gives the final OK on every invoice** in the *Waiting for you* screen (or from the Approve/Reject buttons in Slack and email). Only then is it posted to the ERP, read back to confirm, and paid in a batch.
+| | |
+|---|---|
+| **Live app (runnable)** | **https://invoice-desk-production-8d50.up.railway.app** |
+| **Demo video (5 min)** | **https://www.loom.com/share/5420ebc4ea244d83ae0ef0c1197d3a06** |
+| **Case study (5-page PDF)** | [docs/Invoice_Desk_case_study.pdf](docs/Invoice_Desk_case_study.pdf) |
+
+> [!IMPORTANT]
+> **The email part (n8n + Gmail) works only on my laptop.** In the video, the agent emails Stores, I reply from Gmail, and n8n hands the reply back to the agent. That loop needs n8n and my Gmail account, which run on my laptop.
+> **On the live link, no real emails are sent.** Everything else works the same online: every stage, every check and every decision. Each message the agent would send is shown in the invoice's Discussion panel and under **Reports → Activity**, and you can answer it with the **Try a reply (demo)** box.
+
+## In one minute
+
+Invoice Desk reads an invoice, checks it against itself, our records and Indian tax rules, asks the right person when something is missing, and **recommends** approve, hold or reject with its reasons. **It never pays on its own: a person makes the final call on every payment.**
+
+| The brief asks for | Where it is |
+|---|---|
+| Accepts a real input | **Upload & check**: any PDF or phone photo, scans and multi-invoice PDFs included (plus email and a vendor form through n8n, on the laptop setup) |
+| Runs through real logic | 11 stages: read, extract, self-check, vendor, duplicate, PO + goods receipt, fraud, tax, recommendation, then ERP posting after a person approves |
+| Produces a real output | A recommendation with reasons, the questions sent to people, an ERP journal and a payment scheduled net of TDS |
+| UI showing each stage | Each stage ticks live beside the invoice; click a field to see where it was read on the page |
+| Dashboard of past runs | **Reports**: every run, what the agent advised, what the person decided, PO usage and accuracy |
+
+| Result | |
+|---|---|
+| 50 invoices with known answers | **100%** right decisions, **0** wrong approvals |
+| 32 hard cases from real complaints about AP tools | **32 / 32** |
+| 20 messy scans and odd layouts | **20 / 20** |
+| Automated tests | **286** passing |
+
+## Try it in 2 minutes (live link)
+
+1. Open the [live app](https://invoice-desk-production-8d50.up.railway.app), press **Reset demo data** (top right), then **Upload & check**.
+2. **"Clean invoice, exact PO match"**: every stage passes and the agent says approve. Approve it under **Invoices**; it moves to **Payments**.
+3. **"Billed before all goods arrived"**: 300 billed, 200 received, so it holds and asks Stores. Open it and use **Try a reply (demo)** to answer as Stores; it re-checks and recommends approval.
+4. **"Real vendor, new bank account"**: held as possible fraud. It does not email the vendor, and approve stays locked until you tick that you phoned them on the number on file.
+5. **Your own invoice**: held as "vendor not onboarded" (correct: nobody unknown gets paid). Press **Test setup & re-check** to create the vendor and PO as test data, or upload your own vendors, POs and goods receipts under **Records**.
+6. See everything under **Reports**, and ask **Jeen** (top right): "What's waiting for me?", "Why is Kaveri on hold?".
+
+## How it works
+
+An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves the numbers, checks it against the vendor master, earlier invoices, the purchase order, goods receipts, fraud signals and Indian tax rules, and **recommends** a decision with its reasons. When something is wrong, it asks the right person **one specific question**, reads their reply and re-checks. **A person gives the final OK on every invoice** in the **Invoices** screen (or from the Approve/Reject buttons in Slack and email). Only then is it posted to the ERP, read back to confirm, and paid in a batch.
 
 | Agent recommends | Meaning | What the person does |
 |---|---|---|
@@ -39,7 +70,7 @@ An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves
 
 **The hard set: 32/32.** 32 bad documents built from real complaints about AP tools (Stampli, BILL and Ramp reviews and forums, OCR failure-mode write-ups, Indian GST audits): credit notes and proformas that must never be paid, statements of account, an advance already paid, amount in words that disagrees with the figures, the 12% GST slab that GST 2.0 removed, a vendor's other-state GSTIN, reverse charge, scans fed sideways or upside down, a scanner's junk text layer, and invisible text that tries to instruct the AI. See [docs/HARD_CASES.md](docs/HARD_CASES.md) (`python scripts/run_hard.py`). The 20 messy scans and layouts in `samples_messy/` are 20/20.
 
-**278 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 9 for several invoices in one PDF, 15 for strange files and your own data (`tests/test_judge_kit.py`), 52 for the hard set and the common-sense checks (`tests/test_hard_cases.py`), 4 for testing with your own invoice (`tests/test_test_setup.py`). All five n8n workflows tested live in n8n 1.123.
+**286 automated tests** (`STAGE_DELAY=0 python -m pytest -q`): 68 for Jeen, 7 for the invoice discussion, 9 for several invoices in one PDF, 15 for strange files and your own data (`tests/test_judge_kit.py`), 52 for the hard set and the common-sense checks (`tests/test_hard_cases.py`), 4 for testing with your own invoice (`tests/test_test_setup.py`), 8 for who may answer by email and how replies are read (`tests/test_internal_emails.py`). All five n8n workflows tested live in n8n 1.123.
 
 ## The 11 stages (live on screen for every invoice)
 
@@ -60,7 +91,7 @@ An invoice arrives (email, vendor form or upload). Invoice Desk reads it, proves
 10. **Recommendation.** Any fail → reject, any warn → hold with handoffs, otherwise approve. A person makes the final call.
 11. **Post to ERP** (after the person approves). GL coding (rules + learned), a balanced journal (expense, input GST, payable net of TDS, TDS payable), posted and **read back field by field**, never twice.
 
-## Waiting for you: the approval screen
+## Invoices: the approval screen
 
 The home screen lists every invoice that needs a person (fraud first, then holds, then approvals; MSME at the top). For the selected invoice it shows:
 
@@ -80,7 +111,7 @@ runs end to end. It is only offered for unknown vendors: for a real vendor, a mi
 
 ## Jeen, the AP assistant
 
-A chat panel on every screen (**Ask Jeen** bottom-right, or `Ctrl`+`K`). The agent does the work; Jeen
+A chat panel on every screen (**Ask Jeen** top right, or `Ctrl`+`K`). The agent does the work; Jeen
 explains it and prepares actions. **Jeen never approves, rejects, pays or edits anything** — there is no
 tool in `app/jeen.py` that can, and a test asserts it stays that way.
 
@@ -173,11 +204,11 @@ The first thing the agent does with a file is look at **every page on its own** 
 | The same invoice printed again ("duplicate for transporter") | Counted once; the copies are noted |
 | More than 10 pages | Held for a person, never half-read |
 
-The agent says what it found the moment the file arrives ("This PDF contains 3 invoices from Kaveri…"), each card in *Waiting for you* shows "2 of 3 in bills.pdf", and the note starts each invoice's discussion.
+The agent says what it found the moment the file arrives ("This PDF contains 3 invoices from Kaveri…"), each card in **Invoices** shows "2 of 3 in bills.pdf", and the note starts each invoice's discussion.
 
 ## The invoice discussion (@mentions and @Jeen)
 
-Every invoice has one discussion, like comments on a shared document, in *Waiting for you*. It shows the whole story in order: when it arrived, the agent's emails and the replies, each re-check, the decision, and the team's comments, with Jeen's two-line summary pinned at the top.
+Every invoice has one discussion, like comments on a shared document, in **Invoices**. It shows the whole story in order: when it arrived, the agent's emails and the replies, each re-check, the decision, and the team's comments, with Jeen's two-line summary pinned at the top.
 
 - **@Jeen** answers inside the thread, with source links ("@Jeen why is this on hold?", "@Jeen what do we owe Kaveri?"). It can explain and draft, never approve or pay.
 - **@Stores, @Procurement, @AP, @Controller, @Manager** send the comment to that team by email with the invoice's `[Ref …]` tag. Their reply comes back into the thread through n8n, the agent understands it ("received 100 more") and re-checks the invoice.
@@ -189,14 +220,14 @@ Every invoice has one discussion, like comments on a shared document, in *Waitin
 The demo's vendors and POs are fictional, so an invoice from your own supplier stops at "vendor not onboarded" (correctly: nobody unknown gets paid). Two ways to check it fully:
 
 1. **Records → Use your own vendors, POs and goods receipts.** Download the templates, fill them (or export from your ERP), upload vendors, then POs, then receipts. CSV or Excel; column names like "GST No", "Qty", "Rate" are understood. Bad rows are listed and skipped. Your data survives "Reset demo data"; "Remove my imported data" takes it out.
-2. **Onboard from the hold.** On a "vendor not onboarded" invoice in *Waiting for you*, fill in the vendor form (bank account confirmed with the vendor, not copied from the invoice) and the agent re-checks.
+2. **Onboard from the hold.** On a "vendor not onboarded" invoice in **Invoices**, fill in the vendor form (bank account confirmed with the vendor, not copied from the invoice) and the agent re-checks.
 
 **Strange files are handled, not crashed on:**
 
 | File | What happens |
 |---|---|
 | Phone photo or image scan (JPG, PNG, TIFF, WEBP) | Turned into a page and read with OCR |
-| Password-protected or damaged PDF | Plain reason ("ask the vendor for a copy without a password"). From email it still appears in *Waiting for you*, so it can't get lost |
+| Password-protected or damaged PDF | Plain reason ("ask the vendor for a copy without a password"). From email it still appears in **Invoices**, so it can't get lost |
 | Logo or signature image in an email | Ignored |
 | Foreign-currency invoice | Held for the finance controller |
 | Totals on page 2 | Read (digital PDFs, up to 5 pages) |
@@ -207,7 +238,7 @@ The demo's vendors and POs are fictional, so an invoice from your own supplier s
 # Python 3.11+, Tesseract (Windows: winget install UB-Mannheim.TesseractOCR | macOS: brew install tesseract tesseract-lang)
 pip install -r requirements.txt
 uvicorn app.main:app --reload             # http://localhost:8000
-STAGE_DELAY=0 python -m pytest -q         # 278 tests
+STAGE_DELAY=0 python -m pytest -q         # 286 tests
 python scripts/evaluate.py                # accuracy report -> docs/EVALUATION.md + dashboard
 python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVAL.md
 ```
@@ -220,10 +251,20 @@ python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVA
 | `GEMINI_MODEL`, `ANTHROPIC_MODEL` | override the model (defaults `gemini-2.5-flash`, `claude-sonnet-5-5`) |
 | `INTAKE_TOKEN`, `PUBLIC_URL`, `N8N_WEBHOOK_URL`, `APP_SECRET` | n8n connection (see `integrations/n8n/README.md`) |
 | `APPROVAL_MODE` | `human` (default): a person gives the final OK on every invoice. `auto`: the agent approves clean invoices on its own |
-| `INTERNAL_EMAIL_DOMAINS` | whose email replies may approve or confirm (default `yourcompany.com`) |
+| `INTERNAL_EMAIL_DOMAINS` | company domains whose email replies may approve or confirm (default `yourcompany.com,meridianfoods.example`) |
+| `INTERNAL_EMAILS` | individual colleague addresses outside those domains, comma-separated (the demo uses this so a Gmail address can answer as Stores) |
 | `STAGE_DELAY` | pause between stages for the live view (default 0.45 s; not counted in processing time) |
 
-**Deploy:** the `Dockerfile` installs Tesseract with Hindi. For Hugging Face Spaces, use the Docker SDK and push the repo. For Render, `render.yaml` is included.
+**Deploy:** the live link runs the `Dockerfile` (Tesseract with Hindi) on Railway; it listens on `$PORT`. `render.yaml` is included for Render.
+
+**Running the full email loop locally (Windows, as in the video):**
+
+```powershell
+.\start-n8n.ps1    # n8n on http://localhost:5678 (import the 5 workflows from integrations/n8n/)
+.\start-app.ps1    # the app on http://localhost:8000
+```
+
+Connect a Gmail OAuth2 credential in n8n to the Gmail nodes of workflows 1, 3 and 5, and put your address in `INTERNAL_EMAILS` (in `start-app.ps1`) so your replies count as Stores. n8n calls the app on `127.0.0.1`, not `localhost`: on Windows, Node resolves `localhost` to IPv6 `::1` while the app listens on IPv4.
 
 ## n8n (`integrations/n8n/`, five importable workflows)
 
@@ -235,18 +276,13 @@ python scripts/eval_jeen.py               # Jeen's 31 questions -> docs/JEEN_EVA
 4. **Escalation timer:** hourly
 5. **Read replies:** `[Ref …]` replies go back to the agent
 
-## A 5-minute demo order
+## What the demo video shows
 
-1. **01 clean:** the 11 stages run live. Click a field to see it on the paper. Then in **Waiting for you**, read the agent's reasons and approve: watch it post and schedule payment.
-2. **05 fax:** the OCR misread is repaired, and the proof is shown.
-3. **10 bank change:** risk score, plus the phone-check question.
-4. **12 goods not received:** in Waiting for you, the 3-way boxes show 200 received in red. Click "Stores: the rest arrived": it books the receipt, re-checks, and turns green. You approve.
-5. **14 → 15:** type two fields once, then the next invoice is read automatically.
-6. **Dashboard:** straight-through rate, exceptions by owner, and the accuracy panel (0 false approvals).
-7. **Payments:** batch, bank file, TDS to deposit.
-8. **Ask Jeen** (bottom-right, or `Ctrl`+`K`): "What's waiting for me?", "Why is Kaveri on hold?",
-   "What's left on PO-2026-0104?". Then try "just approve it" and watch it refuse and offer the form
-   instead.
+1. **Happy path:** a clean Sundaram invoice runs through all 11 stages; the agent recommends approve and I approve it.
+2. **Goods not received (with the real email loop):** Kaveri billed 300 helmets, 200 arrived. The agent holds it and emails Stores through n8n; I reply from Gmail ("Received the remaining 100 helmets today"); n8n hands the reply back, the agent records the receipt, re-checks and recommends approval. Jeen explains the hold before and confirms the result after.
+3. **Fraud:** a real vendor's invoice with a new bank account. The agent holds it, refuses to email the vendor, and asks for a phone check on the number on file.
+4. **Not a bill:** a credit note. No approve button at all, only "Dismiss: nothing to pay".
+5. **Proof:** Reports (every past run), the accuracy numbers, and how to test with your own invoices and data.
 
 ## Assumptions (change in `app/config.py`, `app/compliance.py`, `app/playbook.py`)
 
