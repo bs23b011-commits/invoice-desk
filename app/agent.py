@@ -146,6 +146,12 @@ def parse_reply(text: str, run: dict, party: str) -> dict:
         return dict(intent="provide_po", po=norm_po(m.group(1)), how="rules")
     if party.startswith("internal") and re.search(r"\b(not|haven'?t|has not|have not)\s+(been\s+)?(received|arrived)", low):
         return dict(intent="not_received", how="rules")
+    # "will receive on Friday", "rest expected next week", "still on hold": not here yet (and no past receipt in it)
+    later = re.search(r"\b(will|shall|going to|yet to|expected|expecting|pending|awaited|on hold|next week|tomorrow"
+                      r"|by (?:mon|tues|wednes|thurs|fri|satur|sun)day|on (?:mon|tues|wednes|thurs|fri|satur|sun)day)\b", low)
+    done = re.search(r"(?<!be )(?<!been )(?<!not )\b(received|arrived|delivered)\b", low)
+    if party.startswith("internal") and later and not done:
+        return dict(intent="not_received", how="rules")
     m = re.search(rf"(?:received|arrived|got)\D{{0,20}}{NUM}(?:\s+(?:more|additional|units|nos|pcs|pieces|pairs))?", low) \
         or re.search(rf"{NUM}\s+(?:more\s+)?(?:\w+\s+){{0,3}}(?:received|arrived)", low)
     if party.startswith("internal") and m:
@@ -185,7 +191,7 @@ def receive_reply(run_id: str | None, sender: str, subject: str, body: str, part
         s_low = (sender or "").lower()
         if vendor and s_low == vendor["email"].lower():
             party = "vendor"
-        elif s_low.split("@")[-1] in internal_domains():
+        elif s_low in internal_emails() or s_low.split("@")[-1] in internal_domains():
             party = "internal:" + sender
         else:  # a stranger replying to a payment thread must never be able to approve anything
             party = "unknown:" + (sender or "unknown")
@@ -206,6 +212,12 @@ def receive_reply(run_id: str | None, sender: str, subject: str, body: str, part
     if not live:
         store.save_run(target)
     return dict(status="ok", run_id=run_id, parsed=parsed, outcome=outcome)
+
+
+def internal_emails() -> set[str]:
+    """Individual colleague addresses outside the company domain (e.g. the demo's Stores mailbox on Gmail)."""
+    import os
+    return {e.strip().lower() for e in os.getenv("INTERNAL_EMAILS", "").split(",") if "@" in e}
 
 
 def internal_domains() -> set[str]:
